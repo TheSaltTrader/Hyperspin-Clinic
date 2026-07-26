@@ -16,10 +16,27 @@ SYSTEM = (
 )
 
 
+def overview(cfg):
+    """Live one-line collection overview injected into every question so
+    the model knows what systems exist even before anything is indexed."""
+    try:
+        from . import hyperspin_db as hdb
+        systems = hdb.list_systems(cfg.get("hyperspin_root", ""))
+        if systems:
+            return ("Installed systems (from Databases\\Main\\Main.xml): "
+                    + ", ".join(systems))
+    except Exception:
+        pass
+    return ""
+
+
 def ask(cfg, question, k=8, history=None):
-    """Returns (answer_text, retrieved_chunks, es_ok)."""
+    """Returns (answer_text, retrieved_chunks, es_ok, cost_usd|None)."""
     chunks, es_ok = search.hybrid(cfg, question, k=k)
     ctx_lines = []
+    ov = overview(cfg)
+    if ov:
+        ctx_lines.append(f"[live] {ov}")
     for i, c in enumerate(chunks, 1):
         src = c["meta"].get("source", "?")
         ctx_lines.append(f"[{i}] (source: {src})\n{c['text']}")
@@ -34,11 +51,20 @@ def ask(cfg, question, k=8, history=None):
     if not key:
         raise RuntimeError("No Claude API key stored (Setup tab).")
     client = anthropic.Anthropic(api_key=key)
+    model = cfg.get("model", "claude-haiku-4-5")
     resp = client.messages.create(
-        model=cfg.get("model", "claude-sonnet-5"),
+        model=model,
         max_tokens=1500,
         system=SYSTEM,
         messages=messages,
     )
     answer = "".join(b.text for b in resp.content if b.type == "text")
-    return answer, chunks, es_ok
+    cost = None
+    try:
+        from . import costs
+        u = resp.usage
+        cost = costs.estimate(model, u.input_tokens, u.output_tokens)
+        costs.record_spend(cost)
+    except Exception:
+        pass
+    return answer, chunks, es_ok, cost

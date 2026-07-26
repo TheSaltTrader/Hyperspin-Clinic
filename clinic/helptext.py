@@ -114,6 +114,19 @@ estimate computed from the actual pace). Stop is always available and
 kills the whole running process tree cleanly. Everything is revertible
 from the Revert tab.
 
+━━━ ASK AI (RAG chat) ━━━━━━━━━━━━━━━━━━━━━━━
+Chat about your collection. Every question runs retrieval-augmented
+generation: the most relevant indexed facts are fetched with hybrid
+search (Elasticsearch BM25 + vector similarity, reciprocal-rank
+fusion; vector-only when ES is off) and Claude answers FROM those
+chunks, citing them as [n]. What is searchable: game metadata indexed
+by the Systems tab, plus the tracked art additions, renames and
+reverts. A live list of your installed systems is always included.
+Run the Systems tab at least once so there is data to search. Needs
+the API key from Setup; each answer shows chunks used, sources, and
+the question's dollar cost (same tracking as enrichment). The last 6
+turns are kept as conversation context.
+
 ━━━ REVERT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Lists every system where the Clinic made changes, rebuilt from backups
 and the database logs. Pick the categories to bring back (XML

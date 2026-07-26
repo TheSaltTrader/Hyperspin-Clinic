@@ -188,6 +188,17 @@ Three steps, each optional, run in order per checked system:
 Live log, status + percentage, and a Stop button that kills the whole
 running process tree cleanly. Everything is revertible.
 
+### Ask AI (implemented)
+A chat window over your collection, powered by the RAG stack. Every
+question retrieves the most relevant indexed facts — game metadata from
+enrichment, tracked art additions, renames, reverts — via **hybrid
+Elasticsearch + vector search** (reciprocal-rank fusion; vector-only
+fallback when ES is off), and Claude answers from those chunks with
+`[n]` citations. A live list of installed systems is always injected so
+the model knows your setup even before anything is indexed. Each answer
+shows how many chunks were used, their sources, and the question's
+dollar cost. The last 6 turns carry over as conversation context.
+
 ### Revert (implemented)
 Lists every system where the Clinic made changes (rebuilt from backups
 and the database logs) with a category filter: XML metadata, added

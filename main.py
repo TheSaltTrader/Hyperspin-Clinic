@@ -211,6 +211,9 @@ class ClinicApp(tk.Tk):
         self.nb.add(self.tab_themes, text="Themes")
         self._build_themes(self.tab_themes)
         self.tab_revert = ttk.Frame(self.nb)
+        self.tab_ask = ttk.Frame(self.nb)
+        self.nb.add(self.tab_ask, text="Ask AI")
+        self._build_ask(self.tab_ask)
         self.nb.add(self.tab_revert, text="Revert")
         self._build_revert(self.tab_revert)
         self.tab_help = ttk.Frame(self.nb)
@@ -457,7 +460,9 @@ class ClinicApp(tk.Tk):
                       2: getattr(getattr(self, "art_list", None), "canvas", None),
                       3: getattr(getattr(self, "rename_list", None), "canvas", None),
                       4: getattr(getattr(self, "themes_list", None), "canvas", None),
-                      5: getattr(self, "rv_canvas", None)}.get(idx)
+                      6: getattr(self, "rv_canvas", None)}.get(idx)
+            # idx 5 (Ask AI) intentionally absent: the chat Text widget
+            # scrolls itself via the Text class binding
             if canvas:
                 canvas.yview_scroll(-1 * (e.delta // 120), "units")
         self.sys_canvas.bind_all("<MouseWheel>", _wheel)
@@ -883,6 +888,110 @@ class ClinicApp(tk.Tk):
             except Exception as e:
                 msg = str(e)
                 self.after(0, lambda m=msg: messagebox.showerror("Rename", m))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # ---------- Ask AI tab (RAG chat) ----------
+    def _build_ask(self, tab):
+        pad = {"padx": 16}
+        ttk.Label(tab, text="Ask AI", style="H.TLabel").pack(anchor="w", pady=(14, 2), **pad)
+        ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
+            "Chat about your collection using RAG: every question retrieves "
+            "the most relevant indexed facts (game metadata from enrichment, "
+            "art additions, renames, reverts) via hybrid Elasticsearch + "
+            "vector search, and Claude answers from them with [n] citations. "
+            "Run the Systems tab at least once so there is data to search. "
+            "Requires the API key from Setup; per-question cost is shown.")
+        ).pack(anchor="w", pady=(0, 6), **pad)
+
+        wrap = ttk.Frame(tab)
+        wrap.pack(fill="both", expand=True, **pad)
+        self.txt_chat = tk.Text(wrap, bg="#fafafa", fg=FG, relief="flat",
+                                wrap="word", font=("Segoe UI", 10),
+                                state="disabled", padx=8, pady=8,
+                                highlightthickness=1,
+                                highlightbackground="#dddddd")
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=self.txt_chat.yview)
+        self.txt_chat.configure(yscrollcommand=sb.set)
+        self.txt_chat.tag_configure("you", foreground=ACCENT,
+                                    font=("Segoe UI", 10, "bold"))
+        self.txt_chat.tag_configure("ai", foreground=FG)
+        self.txt_chat.tag_configure("meta", foreground=SUBTLE,
+                                    font=("Segoe UI", 8))
+        self.txt_chat.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        row = ttk.Frame(tab)
+        row.pack(fill="x", pady=(8, 2), **pad)
+        self.var_q = tk.StringVar()
+        self.ent_q = ttk.Entry(row, textvariable=self.var_q)
+        self.ent_q.pack(side="left", fill="x", expand=True, ipady=4)
+        self.ent_q.bind("<Return>", lambda e: self._ask_send())
+        self.btn_ask = ttk.Button(row, text="Ask", command=self._ask_send)
+        self.btn_ask.pack(side="left", padx=(8, 0))
+        self.lbl_ask_status = ttk.Label(tab, text="", style="Status.TLabel",
+                                        wraplength=500, justify="left")
+        self.lbl_ask_status.pack(anchor="w", pady=(2, 10), **pad)
+        self._ask_history = []
+        self._ask_busy = False
+
+    def _chat_append(self, text, tag):
+        self.txt_chat.configure(state="normal")
+        self.txt_chat.insert("end", text, tag)
+        self.txt_chat.see("end")
+        self.txt_chat.configure(state="disabled")
+
+    def _ask_send(self):
+        if self._ask_busy:
+            return
+        question = self.var_q.get().strip()
+        if not question:
+            return
+        if not secrets.is_stored():
+            messagebox.showwarning("Ask AI", "Add your Claude API key in "
+                                   "Setup first.")
+            return
+        self.var_q.set("")
+        self._ask_busy = True
+        self.btn_ask.configure(state="disabled")
+        self._chat_append(f"You: {question}\n", "you")
+        self.lbl_ask_status.configure(text="Retrieving + asking Claude…",
+                                      foreground=SUBTLE)
+        cfg = dict(self.cfg)
+        history = list(self._ask_history)
+
+        def run():
+            try:
+                from clinic import rag
+                answer, chunks, es_ok, cost = rag.ask(cfg, question,
+                                                      history=history)
+                def done():
+                    self._chat_append(f"AI: {answer}\n\n", "ai")
+                    srcs = ", ".join(sorted({c["meta"].get("source", "?")
+                                             for c in chunks})) or "none"
+                    bits = [f"{len(chunks)} chunk(s) retrieved",
+                            "ES+vector" if es_ok else
+                            "vector only (Elasticsearch off)"]
+                    if cost is not None:
+                        bits.append(f"cost ≈ ${cost:.4f}")
+                    self._chat_append("    [" + " | ".join(bits)
+                                      + f" | sources: {srcs}]\n\n", "meta")
+                    self.lbl_ask_status.configure(text="")
+                    self._ask_history.append(
+                        {"role": "user", "content": question})
+                    self._ask_history.append(
+                        {"role": "assistant", "content": answer})
+                    del self._ask_history[:-12]   # keep the last 6 turns
+                self.after(0, done)
+            except Exception as e:
+                msg = str(e)
+                self.after(0, lambda m=msg: (
+                    self._chat_append(f"AI: (error) {m}\n\n", "meta"),
+                    self.lbl_ask_status.configure(text="Failed - see chat.",
+                                                  foreground=BAD)))
+            finally:
+                self.after(0, lambda: (self.btn_ask.configure(state="normal"),
+                                       setattr(self, "_ask_busy", False)))
 
         threading.Thread(target=run, daemon=True).start()
 
