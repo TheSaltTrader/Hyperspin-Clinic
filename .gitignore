@@ -17,3 +17,6 @@ data/
 
 # Local test rig (contains theme/video media - never publish)
 test_hs/
+
+# Local GitHub token - must NEVER be committed
+token.txt
