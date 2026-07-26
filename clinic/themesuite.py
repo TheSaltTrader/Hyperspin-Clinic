@@ -160,7 +160,7 @@ def theme_stats(cfg, system):
     if not os.path.isdir(tdir):
         return None
     n = {"total": 0, "flash": 0, "video": 0, "installed": 0,
-         "raster": 0, "bad": 0}
+         "raster": 0, "c169": 0, "bad": 0}
     for fname in os.listdir(tdir):
         if not fname.lower().endswith(".zip"):
             continue
@@ -177,6 +177,12 @@ def theme_stats(cfg, system):
                     txt = z.read(names[idx]).decode("utf-8", "replace")
                     if "Rendered theme video" in txt:
                         n["installed"] += 1
+                        continue
+                    # mrfomt-convention marker: theme already 16:9 (the
+                    # converter stamps its outputs the same way and
+                    # bypasses marked themes on future runs)
+                    if re.search(r"16\s*[:x]\s*9", txt):
+                        n["c169"] += 1
                         continue
                 art = [b for b in low
                        if not b.startswith(".")
@@ -206,10 +212,10 @@ def theme_stats(cfg, system):
         except Exception:
             n["bad"] += 1
     n["converted_already"] = os.path.isdir(os.path.join(base, "Themes_backup"))
-    # converter processes raster themes; flash/video/installed stay untouched
+    # converter processes raster themes; 16:9-marked ones are bypassed
     n["to_169"] = n["raster"]
     # recorder skips native video themes and installed recordings
-    n["to_video"] = n["raster"] + n["flash"]
+    n["to_video"] = n["raster"] + n["flash"] + n["c169"]
     return n
 
 
@@ -224,6 +230,8 @@ def stats_line(cfg, system):
     parts = []
     if n["raster"]:
         parts.append(f"{n['raster']} png")
+    if n["c169"]:
+        parts.append(f"{n['c169']} already 16:9")
     if n["flash"]:
         parts.append(f"{n['flash']} flash")
     if n["video"]:

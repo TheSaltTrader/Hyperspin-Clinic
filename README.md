@@ -174,6 +174,10 @@ Three steps, each optional, run in order per checked system:
 
 1. **Convert 16:9** — converts the system's 4:3 themes to widescreen.
    Originals are backed up to `Media\<System>\Themes_backup` first.
+   Every converted theme is stamped inside its `Info.txt`
+   (`Converted to 16:9 by HyperSpin Theme Suite <date>` — the same
+   convention mrfomt's themes use), and **stamped themes are bypassed on
+   future runs**, so re-running conversion only touches new themes.
 2. **Record videos** — renders every theme to a 1920×1080 video with
    the suite's recorder (Chrome + ffmpeg; the log pane streams the
    recorder's progress live).

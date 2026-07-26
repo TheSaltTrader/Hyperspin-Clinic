@@ -98,7 +98,10 @@ themes are NEVER rendered to mp4 unless you tick Record/Install.
 Three steps, run per checked system in order:
  • Convert 16:9 — converts the system's 4:3 themes to 16:9
    (widescreen). Originals are backed up to Media\\<System>\\
-   Themes_backup first.
+   Themes_backup first. Converted themes are stamped in their
+   Info.txt ("Converted to 16:9 by HyperSpin Theme Suite", the
+   mrfomt convention) and BYPASSED on future runs - re-running
+   only processes themes not yet marked 16:9.
  • Record videos — renders every theme to a 1920x1080 video using the
    suite's recorder (Chrome + ffmpeg; can take a while — the log pane
    streams the recorder's progress live).
