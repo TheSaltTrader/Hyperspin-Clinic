@@ -20,3 +20,7 @@ test_hs/
 
 # Local GitHub token - must NEVER be committed
 token.txt
+
+# Local test screenshots / cab photos dropped in the project root
+/*.jpg
+/*.png
