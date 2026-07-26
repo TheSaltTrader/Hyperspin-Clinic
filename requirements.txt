@@ -1,0 +1,5 @@
+elasticsearch>=8.14,<9
+chromadb>=0.5
+anthropic>=0.34
+keyring>=25
+pillow>=10

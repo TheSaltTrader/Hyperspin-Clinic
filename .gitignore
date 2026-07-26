@@ -1,0 +1,19 @@
+# Build output
+build/
+dist/
+*.spec
+__pycache__/
+*.py[cod]
+
+# Local environment
+.venv/
+venv/
+
+# Machine-specific settings and runtime data (paths, logs, vector DB).
+# Secrets are NEVER in files (Windows Credential Manager) - this is
+# only local state that doesn't belong in the repo.
+settings.json
+data/
+
+# Local test rig (contains theme/video media - never publish)
+test_hs/
