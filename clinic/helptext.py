@@ -136,7 +136,12 @@ themes are NEVER rendered to mp4 unless you tick Record/Install.
 Three steps, run per checked system in order:
  • Convert 16:9 — converts the system's 4:3 themes to 16:9
    (widescreen). Originals are backed up to Media\\<System>\\
-   Themes_backup first. Converted themes are stamped in their
+   Themes_backup first. Themes whose video frame is baked into a
+   full-canvas Flash artwork (the converter cannot resize SWF) are
+   kept VERBATIM so frame and video stay registered on the 16:9
+   stretch — squeezing the video would tear it out of its flash
+   bezel (the dmnfrnt case). XML-drawn borders (bsize/bcolor) always
+   follow the video automatically and never need this. Converted themes are stamped in their
    Info.txt ("Converted to 16:9 by HyperSpin Theme Suite", the
    mrfomt convention) and BYPASSED on future runs - re-running
    only processes themes not yet marked 16:9.

@@ -218,6 +218,12 @@ Three steps, each optional, run in order per checked system:
 
 1. **Convert 16:9** — converts the system's 4:3 themes to widescreen.
    Originals are backed up to `Media\<System>\Themes_backup` first.
+   Themes whose video frame is baked into a **full-canvas Flash
+   artwork** are kept verbatim (converter v2.8): SWF can't be resized,
+   so squeezing the video would tear it out of its flash bezel — the
+   uniform 16:9 stretch keeps frame and video registered instead
+   (XML-drawn `bsize`/`bcolor` borders always follow the video and
+   are unaffected).
    Every converted theme is stamped inside its `Info.txt`
    (`Converted to 16:9 by HyperSpin Theme Suite <date>` — the same
    convention mrfomt's themes use), and **stamped themes are bypassed on
