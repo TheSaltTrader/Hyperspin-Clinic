@@ -124,7 +124,13 @@ shown or touched. Press **Start enrichment** and, for each checked system:
 2. Games missing any of **published year / manufacturer / genre** are sent
    to Claude in batches of 40; the model identifies each game from its rom
    name + description and returns structured JSON. Unidentifiable games
-   are left blank — never wild guesses.
+   are left blank — never wild guesses. Games the model can't identify
+   from its own knowledge (typically recent 2024+ releases past its
+   training cutoff) are automatically retried in a **web-search pass**
+   — the AI looks each one up online and verifies year/publisher/genre
+   before answering (≈$0.01 per search + tokens, ~2¢ per game, shown in
+   the log; opt out via the *Web-search games the AI can't identify*
+   checkbox).
 3. The system XML is updated **surgically** (per-tag edits that preserve
    the file's formatting; a timestamped backup goes to
    `Databases\<System>\clinic_backups\` before any write). By default only

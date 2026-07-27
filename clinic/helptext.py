@@ -75,6 +75,13 @@ For each checked system, Start enrichment:
     overwritten),
  4. indexes every game into the vector database and Elasticsearch under
     the system name.
+Games the model cannot identify from its own knowledge (typically
+recent 2024+ releases past its training data) are automatically
+retried in a WEB-SEARCH pass: the AI looks each one up online and
+verifies year/publisher/genre before answering. This is the checkbox
+"Web-search games the AI can't identify" — searches cost about $0.01
+each on top of tokens (shown in the log per batch, roughly 2 cents
+per game); untick it to skip the pass.
 Status bar + percentage show what is happening at every step; Stop
 halts cleanly between batches.
 

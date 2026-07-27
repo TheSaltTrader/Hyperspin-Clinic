@@ -29,3 +29,9 @@ token.txt
 # Bundled Theme Suite (large binaries: deno/ffmpeg/ruffle) - ships in the
 # release zip, not in the repo
 theme_suite/
+
+# Local API-key drop files (the key belongs in the Credential Manager via
+# the Setup tab - these must never reach the repo)
+APIKEY.txt
+apikey.txt
+token.txt

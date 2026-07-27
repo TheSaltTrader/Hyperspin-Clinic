@@ -20,12 +20,16 @@ BATCH = 40
 
 PROMPT = (
     "You are filling missing metadata for a {system} game list from a "
-    "HyperSpin arcade frontend database. For each entry give the original "
-    "release year (4 digits), the manufacturer/publisher, and ONE genre "
-    "from common arcade genre names (Shooter, Platform, Fighter, Puzzle, "
+    "HyperSpin frontend database. The list can mix classic arcade games "
+    "with modern console/PC titles — the description often carries a "
+    "platform hint like (PC), (PS5) or (ARC); use it, and take care to "
+    "pick the RIGHT game when a title matches several (e.g. a 2024 "
+    "reboot vs. a 1991 arcade original). For each entry give the "
+    "original release year (4 digits), the manufacturer/publisher, and "
+    "ONE genre — prefer these names (Shooter, Platform, Fighter, Puzzle, "
     "Racing, Sports, Maze, Beat-'em-Up, Pinball, Gambling, Quiz, "
-    "Shoot-'em-Up, Run and Gun, Adventure, RPG, Music, Party, Other). "
-    "Use the rom name and description to identify the game. If you truly "
+    "Shoot-'em-Up, Run and Gun, Adventure, RPG, Music, Party, Other) "
+    "but another fitting one-word genre is allowed. If you truly "
     "cannot identify a game, use empty strings for its fields — never "
     "guess wildly.\n"
     "Reply with ONLY a JSON array, one object per input entry, format: "
@@ -33,6 +37,17 @@ PROMPT = (
     '"genre": "Shooter"}}\n\n'
     "Entries:\n{entries}"
 )
+
+SEARCH_NOTE = (
+    "\nYou have a web search tool. USE IT to look up any game you do not "
+    "confidently know — many entries are recent (2024-2025) releases "
+    "past your training data. Verify the year and publisher before "
+    "answering; still reply with ONLY the JSON array at the end.\n"
+)
+
+# second pass for games the model could not identify from knowledge:
+# smaller batches (searches add tokens fast)
+SEARCH_BATCH = 8
 
 
 class StopRequested(Exception):
@@ -111,7 +126,8 @@ def _parse_reply(text, games):
     return out
 
 
-def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0):
+def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0,
+               web_search=False):
     entries = "\n".join(
         f'- name="{g.name}" description="{g.description}"' for g in games)
     # RAG grounding: retrieved examples of already-complete entries from
@@ -126,6 +142,10 @@ def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0):
         ground = ("\nExisting entries from this database (match their style "
                   "and vocabulary):\n" + ex + "\n")
     model = cfg.get("model", "claude-haiku-4-5")
+    kwargs = {}
+    if web_search:
+        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search",
+                            "max_uses": min(24, 2 * len(games))}]
     # 8000 (was 4000): a 40-game reply that outgrew the cap lost the WHOLE
     # batch silently — the cause of large "never enriched" gaps
     resp = client.messages.create(
@@ -133,7 +153,8 @@ def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0):
         max_tokens=8000,
         messages=[{"role": "user",
                    "content": PROMPT.format(system=system, entries=entries)
-                   + ground}],
+                   + (SEARCH_NOTE if web_search else "") + ground}],
+        **kwargs,
     )
     # cost transparency: price the call from its real token usage and
     # keep the app-lifetime running total (data\api_spend.json)
@@ -150,6 +171,10 @@ def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0):
             else:
                 log(f"    API usage: {u.input_tokens} in / "
                     f"{u.output_tokens} out tokens (pricing n/a for {model})")
+            searches = getattr(getattr(u, "server_tool_use", None),
+                               "web_search_requests", 0) or 0
+            if searches:
+                log(f"    web searches: {searches} (≈${searches * 0.01:.2f})")
         except Exception:
             pass
     text = "".join(b.text for b in resp.content if b.type == "text")
@@ -172,7 +197,7 @@ def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0):
         half = max(1, (len(unanswered) + 1) // 2)
         for i in range(0, len(unanswered), half):
             out.update(_ask_batch(client, cfg, system, unanswered[i:i + half],
-                                  examples, log, depth + 1))
+                                  examples, log, depth + 1, web_search))
     return out
 
 
@@ -207,7 +232,8 @@ def _index_games(cfg, system, games):
     return False
 
 
-def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=None):
+def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=None,
+                  web_search=False):
     """Enrich one system. log: callable(msg). stop_flag: callable() -> bool.
     Returns summary dict."""
     xml_path = hdb.system_xml_path(cfg["hyperspin_root"], system)
@@ -241,6 +267,36 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
         except anthropic.APIError as e:
             log(f"[{system}] batch {i // BATCH + 1}: API error {e.__class__.__name__} — continuing")
         log(f"[{system}] enriched {min(i + BATCH, len(missing))}/{len(missing)}")
+    # -- second pass: web-search the games the model could not identify
+    # from its own knowledge (typically recent 2024+ releases past the
+    # model's training data). Opt-out via the Systems tab checkbox.
+    if web_search:
+        unresolved = [
+            g for g in missing
+            if not all((getattr(g, f) or updates.get(g.name, {}).get(f))
+                       for f in ("year", "manufacturer", "genre"))]
+        if unresolved:
+            log(f"[{system}] {len(unresolved)} game(s) unidentified from "
+                f"model knowledge — retrying with WEB SEARCH "
+                f"(≈$0.01 per search, cost shown per batch)")
+            for i in range(0, len(unresolved), SEARCH_BATCH):
+                if stop_flag():
+                    raise StopRequested()
+                part = unresolved[i:i + SEARCH_BATCH]
+                if progress:
+                    progress(0.5 + 0.4 * i / max(1, len(unresolved)),
+                             f"{system}: web-searching — batch "
+                             f"{i // SEARCH_BATCH + 1}/"
+                             f"{(len(unresolved) + SEARCH_BATCH - 1) // SEARCH_BATCH}")
+                try:
+                    updates.update(_ask_batch(client, cfg, system, part,
+                                              examples, log=log,
+                                              web_search=True))
+                except anthropic.APIError as e:
+                    log(f"[{system}] web-search batch: API error "
+                        f"{e.__class__.__name__} — continuing")
+                log(f"[{system}] web-searched "
+                    f"{min(i + SEARCH_BATCH, len(unresolved))}/{len(unresolved)}")
     if progress:
         progress(0.9, f"{system}: writing XML + indexing")
     changed = 0
