@@ -58,7 +58,11 @@ _ROMAN = {" ii": " 2", " iii": " 3", " iv": " 4", " v ": " 5 ", " vi": " 6"}
 
 
 def norm(name: str) -> str:
-    s = os.path.splitext(name)[0].lower()
+    # strip only KNOWN media extensions - os.path.splitext truncated any
+    # name with a dot in it ('Marvel vs. Capcom 2' became 'marvel vs',
+    # so its exactly-named snap could never match; same for Dr. Mario)
+    s = re.sub(r"\.(png|jpe?g|gif|bmp|mp4|flv|avi|mkv|webm|zip)$", "",
+               name, flags=re.I).lower()
     s = re.sub(r"\([^)]*\)|\[[^\]]*\]", "", s)          # strip regions/tags
     for r, a in _ROMAN.items():
         s = s.replace(r, a)
@@ -66,10 +70,16 @@ def norm(name: str) -> str:
 
 
 def best_match(target: str, pool: dict, cutoff=0.88):
-    """pool: {normalized: original}. Exact key first, then close match."""
+    """pool: {normalized: original}. Exact key first; then unique
+    subtitle-prefix (file 'Marvel vs Capcom 2 - New Age of Heroes' must
+    match game 'Marvel vs. Capcom 2'); then close match."""
     t = norm(target)
     if t in pool:
         return pool[t]
+    if len(t) >= 8:
+        pref = [k for k in pool if k.startswith(t)]
+        if len(pref) == 1:
+            return pool[pref[0]]
     close = difflib.get_close_matches(t, list(pool.keys()), n=1, cutoff=cutoff)
     return pool[close[0]] if close else None
 
@@ -503,6 +513,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                         try:
                             emu = emu_mod.EmuMovies(*creds, log=log)
                             log(f"[{system}] EmuMovies: connected")
+                            _index_emumovies_tree(cfg, emu, log)
                         except Exception as e:
                             log(f"[{system}] EmuMovies: connection failed ({e})")
                             emu = False
@@ -570,29 +581,131 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
     return {"system": system, "added": len(added)}
 
 
+def _index_emumovies_tree(cfg, emu, log):
+    """Refresh data\\emumovies_tree.json (every location for every system)
+    and index it into the database - the user-requested 'train the
+    software' pass. Best-effort, at most once a week."""
+    import json as _json
+    import time as _time
+    path = os.path.join(config.DATA_DIR, "emumovies_tree.json")
+    try:
+        age = _time.time() - os.path.getmtime(path)
+        if age < 7 * 86400:
+            return
+    except OSError:
+        pass
+    try:
+        tree = emu.crawl_tree()
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(tree, f, indent=1)
+        n = sum(len(v) for v in tree["video"].values()) + len(tree["artwork"])
+        log(f"  EmuMovies: full tree crawled — {n} folders saved to "
+            f"emumovies_tree.json")
+        from .ingest import Chunk
+        chunks = [Chunk(
+            id=f"emutree:{re.sub(r'[^a-z0-9]+', '-', root.lower())}",
+            text=f"EmuMovies folders under {root}: " + "; ".join(names),
+            source=path, kind="emumovies_tree", meta={"root": root},
+        ) for root, names in (list(tree["video"].items())
+                              + [(emu_mod.ARTWORK_ROOT, tree["artwork"])])]
+        store.track(cfg, chunks, log)
+    except Exception as e:
+        log(f"  EmuMovies tree crawl skipped: {e}")
+
+
+# region-rename aliases from the media-pipeline knowledge base (EU/JP
+# titles that EmuMovies files under the US name, and vice versa)
+REGION_ALIASES = {
+    "jet set radio": "Jet Grind Radio",
+    "jet grind radio": "Jet Set Radio",
+    "ace golf": "Swingerz Golf",
+    "swingerz golf": "Ace Golf",
+    "castleween": "Spirits & Spells",
+    "spirits & spells": "Castleween",
+    "donald duck quack attack": "Donald Duck Goin' Quackers",
+    "donald duck goin' quackers": "Donald Duck Quack Attack",
+    "mario smash football": "Super Mario Strikers",
+    "super mario strikers": "Mario Smash Football",
+}
+
+
+def _alias_title(desc):
+    if not desc:
+        return None
+    key = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", desc).strip().lower()
+    return REGION_ALIASES.get(key)
+
+
 def _from_emumovies(cfg, emu, system, art, folder, missing, added, log, check_stop):
     still = list(missing)
     if art == "video":
-        vdir = emu.find_video_dir(system)
-        if not vdir:
-            log(f"[{system}] EmuMovies: no video-snap folder found")
+        vdirs = emu.find_video_dirs(system)
+        if not vdirs:
+            log(f"[{system}] EmuMovies: no video-snap folder matched — if "
+                f"one exists, add it to data\\emumovies_map.json under "
+                f"'video::{system}'")
             return still
-        pool = {norm(f): f for f in emu.list_videos(vdir)}
-        log(f"[{system}] EmuMovies: {len(pool)} snaps in {vdir.rsplit('/', 1)[-1]}")
+        # highest quality first, PER GAME: HD sets are often WIP and
+        # incomplete, so each game cascades HD -> HQ -> SQ (user rule)
+        pools, filedir, all_files = [], {}, []
+        for vd in vdirs:
+            fl = emu.list_videos(vd)
+            pools.append((vd, {norm(f): f for f in fl}))
+            for f in fl:
+                filedir.setdefault(f, vd)
+                all_files.append(f)
+            log(f"[{system}] EmuMovies: {len(fl)} snaps in {vd}")
+        # ES verification (user rule): fuzzy-match the needed games
+        # against the combined listing with Elasticsearch when available;
+        # difflib remains the first, offline-safe matcher
+        es_map = None
+        if es_mod.available(cfg):
+            try:
+                from . import renamer
+                es_map = renamer._es_candidates(cfg, list(filedir), still, n=3)
+                if es_map is not None:
+                    log(f"[{system}] EmuMovies: listing indexed in "
+                        f"Elasticsearch for fuzzy verification")
+            except Exception:
+                es_map = None
         out = []
         for g in still:
             check_stop()
-            src = (best_match(g.name, pool)
-                   or (best_match(g.description, pool) if g.description else None))
+            via, src, src_dir = "emumovies", None, None
+            alias = _alias_title(g.description)
+            for vd, pool in pools:
+                src = (best_match(g.name, pool)
+                       or (best_match(g.description, pool) if g.description else None)
+                       or (best_match(alias, pool) if alias else None))
+                if src:
+                    src_dir = vd
+                    if alias and src and norm(src).startswith(norm(alias)[:6]):
+                        via = f"emumovies alias '{alias}'"
+                    break
+            if not src and es_map:
+                from .renamer import _pct
+                for cand in es_map.get(g.name, []):
+                    score = max(_pct(g.name, cand),
+                                _pct(g.description or g.name, cand))
+                    if score >= 60:
+                        src, src_dir = cand, filedir[cand]
+                        via = f"emumovies es-match {score}%"
+                        break
             if src and safe_name(g.name):
                 ext = os.path.splitext(src)[1].lower()
                 dst = os.path.join(folder, g.name + ext)
                 try:
-                    size = emu.download(f"{vdir}/{src}", dst)
+                    size = emu.download(f"{src_dir}/{src}", dst)
+                    qm = re.search(r"\((HD|HQ|SQ)\)", src_dir)
+                    q = qm.group(1) if qm else "?"
                     added.append({"system": system, "game": g.name,
-                                  "art": "video", "source": f"emumovies: {src}",
+                                  "art": "video", "source": f"{via}: {src}",
                                   "path": dst})
-                    log(f"  + {g.name} video from EmuMovies ({size // 1024} KB)")
+                    log(f"  + {g.name} video from EmuMovies [{q}] "
+                        f"({size // 1024} KB"
+                        + (", ES-verified" if "es-match" in via else "")
+                        + (f", via alias" if "alias" in via else "") + ")")
                     continue
                 except Exception as e:
                     log(f"    download failed for {g.name}: {e}")

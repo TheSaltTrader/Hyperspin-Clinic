@@ -169,11 +169,18 @@ through the sources in the knowledge base's order:
    region-title aliases (fuzzy-normalized names, roman numerals folded).
    Alias files are **copied** to the canonical rom name — existing art is
    never renamed or swapped.
-2. **EmuMovies FTP** — `files.emumovies.com` (plain FTP per the knowledge
-   base), using the documented layout: `Official/Video Snaps (HQ|SQ|HD)/…`
-   for snaps and the system's `Logos` pack under `Official/Artwork/…` for
-   wheels (pack downloaded once, cached). Credentials are entered in
-   Setup and stored encrypted in the Credential Manager.
+2. **EmuMovies FTP** — `files.emumovies.com` (FTPS when offered), snaps
+   from `Official/Video Snaps (HD|HQ|SQ)/…` — **highest quality first,
+   per game** (HD sets are often WIP; a game missing there cascades to
+   HQ/SQ) — and the system's `Logos` pack under `Official/Artwork/…`
+   for wheels. System names resolve **vendor-tolerantly** ("Dreamcast" →
+   "Sega Dreamcast (Video Snaps)(HD)"); every resolved location is
+   remembered in `data\emumovies_map.json` (hand-editable — this is how
+   you *train* the software), the **full FTP tree** is crawled weekly to
+   `data\emumovies_tree.json` and indexed into the database, and with
+   Elasticsearch running the needed games are **fuzzy-verified** against
+   the listing. Region renames are aliased (Jet Set Radio ↔ Jet Grind
+   Radio). Credentials are entered in Setup and stored encrypted.
 3. **LaunchBox Games DB** (wheels only) — transparent **Clear Logos**,
    free, no account. Fills what EmuMovies packs don't cover (MAME has
    no Logos pack). Downloads are decode-verified and must be genuinely

@@ -109,8 +109,18 @@ is pre-selected). Sources are tried in the knowledge base's order:
     (case / punctuation / region variants, roman numerals). Aliases are
     COPIED to the canonical rom name; nothing is ever renamed or
     swapped here.
- 2. EMUMOVIES — video snaps (HQ → SQ → HD folders) and the system's
-    Logos pack for wheels (downloaded once, cached).
+ 2. EMUMOVIES — video snaps and the system's Logos pack for wheels
+    (downloaded once, cached). Quality is HIGHEST-FIRST per game:
+    HD → HQ → SQ (HD sets are often works-in-progress, so a game
+    missing there automatically falls back to HQ/SQ). System names
+    are matched vendor-tolerantly ("Dreamcast" finds "Sega Dreamcast
+    (Video Snaps)(HD)"), every resolved location is REMEMBERED in
+    data\\emumovies_map.json (hand-editable to train the software),
+    the full FTP tree is crawled weekly into
+    data\\emumovies_tree.json and indexed in the database, and when
+    Elasticsearch is running the needed games are fuzzy-VERIFIED
+    against the folder listing. Region renames are handled (Jet Set
+    Radio ↔ Jet Grind Radio).
  3. LAUNCHBOX (wheels only) — transparent Clear Logos from the
     LaunchBox Games Database (free, no account). Fills what EmuMovies
     packs don't cover (MAME has no Logos pack). Every download is
