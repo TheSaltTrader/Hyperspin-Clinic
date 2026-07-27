@@ -195,36 +195,185 @@ def _yt_auth_args(cfg):
     return []
 
 
+def _ffmpeg():
+    """The Theme Suite ships ffmpeg - reuse it; PATH as fallback."""
+    suite = config.auto_theme_suite()
+    if suite:
+        p = os.path.join(suite, "ThemeVideo", "ffmpeg.exe")
+        if os.path.isfile(p):
+            return p
+    return shutil.which("ffmpeg")
+
+
+# knowledge base (XBLA/SNES media pipeline): titles/channels that always
+# produce unusable "snaps" - reviews, reaction faces, baked watermarks
+_BAD_TITLE = re.compile(r"review|reaction|commentary|let.?s play|face ?cam"
+                        r"|unboxing|top ?10|ranking|versus|comparison", re.I)
+_BAD_CHANNEL = re.compile(r"IGN|GameSpot|GameTrailers|Kotaku|Polygon|GameXplain", re.I)
+
+_YT_HINT_RE = re.compile(r"needs to be reloaded|Sign in to confirm", re.I)
+
+
+def _tnorm(s):
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def _yt_hint(stderr_text, log):
+    if _YT_HINT_RE.search(stderr_text):
+        log("    HINT: YouTube is refusing anonymous/outdated clients — "
+            "update yt-dlp (pip install -U yt-dlp) and/or configure "
+            "YouTube sign-in on the Setup tab")
+
+
+def _yt_search(yt, query, auth, log):
+    """Metadata-only search (simulate-then-pick, knowledge-base pattern:
+    one cheap search, then WE choose - a one-shot download takes whatever
+    YouTube ranks first). Returns [{id,duration,uploader,title}]."""
+    cmd = [yt, query, "--simulate", "--no-playlist", "--no-warnings",
+           "--sleep-requests", "1", "--socket-timeout", "30",
+           "--print", "C\t%(id)s\t%(duration)s\t%(uploader)s\t%(title)s"] + auth
+    r = subprocess.run(cmd, capture_output=True, timeout=120,
+                       creationflags=0x08000000)
+    _yt_hint(r.stderr.decode(errors="replace"), log)
+    out = []
+    for line in r.stdout.decode(errors="replace").splitlines():
+        parts = line.split("\t")
+        if len(parts) == 5 and parts[0] == "C":
+            try:
+                dur = float(parts[2])
+            except ValueError:
+                dur = 0
+            out.append({"id": parts[1], "duration": dur,
+                        "uploader": parts[3], "title": parts[4]})
+    return out
+
+
+def _pick(cands, title, dur_lo, dur_hi):
+    """Knowledge-base candidate rules: duration window, no review/reaction
+    titles, no watermark channels, and the video title MUST contain the
+    game name (a trailer channel once served the wrong game entirely)."""
+    nt = _tnorm(title)
+    main = _tnorm(title.split(" - ")[0])
+    for c in cands:
+        if dur_lo and c["duration"] < dur_lo:
+            continue
+        if dur_hi and c["duration"] > dur_hi:
+            continue
+        if _BAD_TITLE.search(c["title"]) or _BAD_CHANNEL.search(c["uploader"]):
+            continue
+        ct = _tnorm(c["title"])
+        if nt not in ct and not (len(main) >= 6 and main in ct):
+            continue
+        return c
+    return None
+
+
+def _yt_download(yt, video_id, tmp, auth, log, section=None):
+    cmd = [yt, f"https://www.youtube.com/watch?v={video_id}",
+           "-f", "mp4[height<=480]/best[height<=480]", "-o", tmp,
+           "--no-playlist", "--quiet", "--no-warnings",
+           "--retries", "3", "--fragment-retries", "5",
+           "--socket-timeout", "30", "--sleep-requests", "1"] + auth
+    if section:
+        ff = _ffmpeg()
+        cmd += ["--download-sections", section, "--force-keyframes-at-cuts"]
+        if ff:
+            cmd += ["--ffmpeg-location", os.path.dirname(ff)]
+    r = subprocess.run(cmd, capture_output=True, timeout=420,
+                       creationflags=0x08000000)
+    _yt_hint(r.stderr.decode(errors="replace"), log)
+    return os.path.isfile(tmp)
+
+
+def _crop_union(ff, src, log):
+    """Multi-sample cropdetect UNION (knowledge base: a single-shot
+    cropdetect is unreliable) - limit 64 first (gray bars), then 24."""
+    for limit in (64, 24):
+        boxes = []
+        for ss in (5, 20, 40):
+            r = subprocess.run(
+                [ff, "-ss", str(ss), "-i", src, "-t", "2",
+                 "-vf", f"cropdetect={limit}:2:0", "-f", "null", "-"],
+                capture_output=True, timeout=120, creationflags=0x08000000)
+            boxes += re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)",
+                                r.stderr.decode(errors="replace"))
+        if not boxes:
+            continue
+        b = [tuple(map(int, x)) for x in boxes]
+        x0 = min(x for _w, _h, x, _y in b)
+        y0 = min(y for _w, _h, _x, y in b)
+        x1 = max(w + x for w, _h, x, _y in b)
+        y1 = max(h + y for _w, h, _x, y in b)
+        w, h = x1 - x0, y1 - y0
+        if w >= 160 and h >= 160:
+            return f"crop={w}:{h}:{x0}:{y0}"
+    return None
+
+
+def _snap_transcode(src, dst, log, max_len=60):
+    """Knowledge-base post-processing: crop bars, cut to snap length with
+    fades, normalize to H.264/AAC. Without ffmpeg the raw file is kept."""
+    ff = _ffmpeg()
+    if not ff:
+        os.replace(src, dst)
+        return "raw (no ffmpeg found)"
+    crop = _crop_union(ff, src, log)
+    vf = [crop] if crop else []
+    vf += ["scale=-2:'trunc(min(480,ih)/2)*2'", "setsar=1",
+           "fade=t=in:st=0:d=1", f"fade=t=out:st={max_len - 2}:d=2"]
+    r = subprocess.run(
+        [ff, "-y", "-i", src, "-t", str(max_len),
+         "-vf", ",".join(vf),
+         "-af", f"afade=t=in:st=0:d=1,afade=t=out:st={max_len - 2}:d=2",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", dst],
+        capture_output=True, timeout=300, creationflags=0x08000000)
+    if r.returncode == 0 and os.path.isfile(dst) and os.path.getsize(dst) > 50_000:
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+        return f"{max_len}s snap" + (", bars cropped" if crop else "")
+    os.replace(src, dst)                     # transcode failed: keep raw
+    return "raw (transcode failed)"
+
+
 def youtube_video(desc, dst_path, log, cfg=None):
+    """Search-then-pick ladder from the media-pipeline knowledge base:
+    snap-length gameplay, else a 2-minute section of a longplay, else a
+    trailer - every result cropped/cut to a 60s snap by ffmpeg."""
     yt = _ytdlp()
     if not yt:
         return False
+    from . import launchbox
+    title = launchbox.clean_title(desc)
+    auth = _yt_auth_args(cfg)
     tmp = dst_path + ".yt.mp4"
-    base = _yt_auth_args(cfg) + [
-            "-f", "mp4[height<=480]/best[height<=480]", "-o", tmp,
-            "--no-playlist", "--quiet", "--no-warnings",
-            "--retries", "3", "--fragment-retries", "3"]
-    # Two passes: snap-length videos (<7 min) from the top 5 results first
-    # (long-plays are skipped, transient 403s fall through to the next
-    # candidate); then the old any-length top result, so a game never
-    # loses its video to the duration filter.
-    attempts = (
-        [yt, f"ytsearch5:{desc} arcade gameplay", "--ignore-errors",
-         "--match-filter", "duration<420", "--max-downloads", "1"] + base,
-        [yt, f"ytsearch1:{desc} arcade gameplay"] + base,
+    ladder = (
+        (f"ytsearch6:{title} gameplay", 45, 420, None),
+        (f"ytsearch6:{title} longplay", 600, None, "*00:01:00-00:03:00"),
+        (f"ytsearch6:{title} trailer", 45, 300, None),
     )
     try:
-        for cmd in attempts:
-            # CREATE_NO_WINDOW: yt-dlp (and the ffmpeg it spawns) must never
-            # flash a console at the user - activity shows in the log pane
-            r = subprocess.run(cmd, capture_output=True, timeout=300,
-                              creationflags=0x08000000)
-            # yt-dlp only renames its .part file to tmp on a completed
-            # download, so the file's existence is the success signal
-            # (--max-downloads exits 101 even when it succeeded)
-            if os.path.isfile(tmp):
-                os.replace(tmp, dst_path)
+        for query, lo, hi, section in ladder:
+            pick = _pick(_yt_search(yt, query, auth, log), title, lo, hi)
+            if not pick:
+                continue
+            if _yt_download(yt, pick["id"], tmp, auth, log, section):
+                note = _snap_transcode(tmp, dst_path, log)
+                log(f"    youtube: '{pick['title'][:50]}' ({pick['uploader'][:24]}) — {note}")
                 return True
+        # safety net: the old one-shot top result, still post-processed
+        r = subprocess.run(
+            [yt, f"ytsearch1:{title} gameplay",
+             "-f", "mp4[height<=480]/best[height<=480]", "-o", tmp,
+             "--no-playlist", "--quiet", "--no-warnings", "--retries", "3"] + auth,
+            capture_output=True, timeout=420, creationflags=0x08000000)
+        if os.path.isfile(tmp):
+            note = _snap_transcode(tmp, dst_path, log)
+            log(f"    youtube: top result — {note}")
+            return True
+        _yt_hint(r.stderr.decode(errors="replace"), log)
         log(f"    youtube: no result ({r.stderr.decode(errors='replace')[-80:].strip()})")
     except Exception as e:
         log(f"    youtube error: {e}")
@@ -349,7 +498,35 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                             cfg, emu, system, art, folder, missing,
                             added, log, check_stop)
 
-            # -- 3) YouTube (videos only) --
+            # -- 3) LaunchBox GamesDB clear logos (wheels only) --
+            # knowledge base: transparent clear logos, free, no API key;
+            # fills what EmuMovies packs don't cover (MAME has no pack)
+            if missing and art == "wheel" and opts.get("launchbox"):
+                from . import launchbox
+                still = []
+                for g in missing:
+                    check_stop()
+                    if not safe_name(g.name):
+                        still.append(g)
+                        continue
+                    data = launchbox.fetch_clear_logo(
+                        g.description or g.name, system, log)
+                    if data:
+                        dst = os.path.join(folder, g.name + ".png")
+                        try:
+                            dims = curate_wheel(data, dst)
+                            added.append({"system": system, "game": g.name,
+                                          "art": "wheel",
+                                          "source": "launchbox clear logo",
+                                          "path": dst})
+                            log(f"  + {g.name} wheel from LaunchBox (curated {dims})")
+                            continue
+                        except Exception as e:
+                            log(f"    launchbox wheel failed for {g.name}: {e}")
+                    still.append(g)
+                missing = still
+
+            # -- 4) YouTube (videos only) --
             if missing and art == "video" and opts.get("youtube"):
                 if not _ytdlp():
                     log(f"[{system}] youtube: yt-dlp not installed — skipping")

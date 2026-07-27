@@ -811,6 +811,7 @@ class ClinicApp(tk.Tk):
             "video": tk.BooleanVar(value=True),
             "local": tk.BooleanVar(value=True),
             "emumovies": tk.BooleanVar(value=True),
+            "launchbox": tk.BooleanVar(value=True),
             "youtube": tk.BooleanVar(value=True),
         }
         r1 = ttk.Frame(opts); r1.pack(anchor="w")
@@ -821,6 +822,7 @@ class ClinicApp(tk.Tk):
         ttk.Label(r2, text="Sources: ", style="Sub.TLabel").pack(side="left")
         ttk.Checkbutton(r2, text="Local aliases", variable=self.art_opts["local"]).pack(side="left")
         ttk.Checkbutton(r2, text="EmuMovies", variable=self.art_opts["emumovies"]).pack(side="left", padx=(8, 0))
+        ttk.Checkbutton(r2, text="LaunchBox wheels", variable=self.art_opts["launchbox"]).pack(side="left", padx=(8, 0))
         ttk.Checkbutton(r2, text="YouTube", variable=self.art_opts["youtube"]).pack(side="left", padx=(8, 0))
 
         run = ttk.Frame(tab)
