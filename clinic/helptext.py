@@ -79,11 +79,22 @@ For each checked system, Start enrichment:
     the system name.
 Games the model cannot identify from its own knowledge (typically
 recent 2024+ releases past its training data) are automatically
-retried in a WEB-SEARCH pass: the AI looks each one up online and
-verifies year/publisher/genre before answering. This is the checkbox
-"Web-search games the AI can't identify" — searches cost about $0.01
-each on top of tokens (shown in the log per batch, roughly 2 cents
-per game); untick it to skip the pass.
+retried in a WEB-SEARCH pass: the AI looks each one up online (one
+search per game) and verifies year/publisher/genre before answering.
+This is the checkbox "Web-search games the AI can't identify" —
+searches cost about $0.01 each on top of tokens (shown in the log per
+batch); untick it to skip the pass.
+COST CONTROL — every answer is remembered in data\\enrich_cache.json:
+ - identified games are reused FREE forever, across runs AND across
+   systems (a Favorites wheel that duplicates other wheels' games
+   costs nothing for those), keyed by the game's description;
+ - clones/duplicates inside a system (same description) are answered
+   ONCE and the result applied to every copy;
+ - games that stayed unknown even after web search are skipped on
+   later runs instead of being re-billed — tick "Retry games that
+   previously failed" to deliberately search them again.
+The log states exactly how many games were filled from cache, shared
+a clone answer, or were skipped as previously-failed.
 Status bar + percentage show what is happening at every step; Stop
 halts cleanly between batches.
 
