@@ -643,6 +643,13 @@ class ClinicApp(tk.Tk):
             self.lbl_yt_status.configure(
                 text=f"cookies.txt not found: {f} — sign-in is OFF until "
                      "the file exists.", foreground=BAD)
+        elif b in ("chrome", "edge", "brave", "opera", "vivaldi"):
+            self.lbl_yt_status.configure(
+                text=(f"⚠ Using {b} cookies — Chrome-family browsers "
+                      "lock/encrypt their cookie store and reads often "
+                      "fail (yt-dlp issue 7271). An exported cookies.txt "
+                      "or Firefox is far more reliable."),
+                foreground=BAD)
         elif b:
             self.lbl_yt_status.configure(
                 text=f"✓ Using {b} cookies when YouTube requires sign-in.",
