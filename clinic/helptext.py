@@ -58,8 +58,10 @@ HELP = """HYPERSPIN CLINIC — HOW EVERYTHING WORKS
   the "Billing…" button opens the Anthropic console where it lives.
 
 ━━━ SYSTEMS (metadata enrichment) ━━━━━━━━━━━━
-Reads every system from Databases\\Main Menu\\Main Menu.xml — all
-pre-selected (legacy Databases\\Main\\Main.xml also recognized). The
+Reads every system from Databases\\Main Menu\\Main Menu.xml — NOTHING
+is pre-selected, on this or any tab, so an accidental Start can never
+run on the whole collection; tick what you want (or press All).
+(Legacy Databases\\Main\\Main.xml also recognized.) The
 main menu database is the SINGLE source of truth on every tab: a
 system folder that exists on disk but is not listed there is never
 touched.
@@ -86,8 +88,8 @@ Status bar + percentage show what is happening at every step; Stop
 halts cleanly between batches.
 
 ━━━ MISSING ART ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Finds missing wheel art and videos for the selected systems (all
-pre-selected). Sources are tried in the knowledge base's order:
+Finds missing wheel art and videos for the systems you tick (nothing
+is pre-selected). Sources are tried in the knowledge base's order:
  1. LOCAL FIRST — alias-named files already in the system's own folders
     (case / punctuation / region variants, roman numerals). Aliases are
     COPIED to the canonical rom name; nothing is ever renamed or

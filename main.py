@@ -12,9 +12,11 @@ from clinic import artfinder, config, enrich, hyperspin_db as hdb, secrets
 
 
 class SystemListPanel:
-    """Reusable scrollable checkbox list of systems (all pre-selected)."""
+    """Reusable scrollable checkbox list of systems. NOTHING is
+    pre-selected on any tab (user rule: an accidental Start must never
+    run on the whole collection) — use the All button to select all."""
 
-    def __init__(self, parent, height=220, preselect=True, stats=False,
+    def __init__(self, parent, height=220, preselect=False, stats=False,
                  get_cfg=None, stats_fn=None):
         self.vars = {}
         self.preselect = preselect
@@ -564,8 +566,9 @@ class ClinicApp(tk.Tk):
         pad = {"padx": 16}
         ttk.Label(tab, text="Systems", style="H.TLabel").pack(anchor="w", pady=(16, 2), **pad)
         ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
-            "Systems from Databases\\Main Menu\\Main Menu.xml. All are pre-selected — "
-            "untick any you want to skip, then Start: every game of each "
+            "Systems from Databases\\Main Menu\\Main Menu.xml. Nothing is "
+            "pre-selected — tick the systems to work on (or All), then "
+            "Start: every game of each "
             "selected system gets its published year, manufacturer and genre "
             "filled in by AI, the system XML is updated (backup taken), and "
             "the data is stored per system in the vector database and "

@@ -113,7 +113,9 @@ URLs, model choice).
 ### Systems (implemented)
 The fun stuff. The tab reads every game system from
 `Databases\Main Menu\Main Menu.xml` (legacy `Databases\Main\Main.xml`
-also recognized) and lists them with checkboxes — **all pre-selected**.
+also recognized) and lists them with checkboxes — **nothing
+pre-selected** (on any tab — an accidental Start can never run on the
+whole collection; use *All* to select everything).
 The main menu database is the **single source of truth on every tab**:
 a system folder that exists on disk but is not listed there is never
 shown or touched. Press **Start enrichment** and, for each checked system:
@@ -144,7 +146,7 @@ Progress log, per-system progress bar, and a Stop button (finishes the
 current batch, then halts cleanly).
 
 ### Missing Art (implemented)
-Same pre-selected system list. For each checked system it finds **missing
+Same system list (nothing pre-selected). For each checked system it finds **missing
 wheel art** and **missing videos** (games from the system database vs.
 `Media\<System>\Images\Wheel` and `Media\<System>\Video`), then works
 through the sources in the knowledge base's order:
