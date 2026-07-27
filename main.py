@@ -4,6 +4,7 @@
 # Run: python main.py
 import os
 import queue
+import re
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -11,10 +12,16 @@ from tkinter import filedialog, messagebox, ttk
 from clinic import artfinder, config, enrich, hyperspin_db as hdb, secrets
 
 
+SORT_MODES = ("Name A→Z", "Name Z→A", "Missing asc", "Missing desc")
+
+
 class SystemListPanel:
     """Reusable scrollable checkbox list of systems. NOTHING is
     pre-selected on any tab (user rule: an accidental Start must never
-    run on the whole collection) — use the All button to select all."""
+    run on the whole collection) — use the All button to select all.
+    Sortable by system name or by the analysis line's missing count
+    (user rule) — the default is ALPHABETICAL ascending, regardless of
+    the Main Menu.xml order."""
 
     def __init__(self, parent, height=220, preselect=False, stats=False,
                  get_cfg=None, stats_fn=None):
@@ -24,11 +31,19 @@ class SystemListPanel:
         self.stats_fn = stats_fn      # optional (cfg, system) -> (text, ok)
         self.get_cfg = get_cfg
         self._stats_gen = 0
+        self.missing = {}             # system -> numeric missing count (from stats)
+        self._rows = {}               # system -> [checkbutton, stat label|None]
         bar = ttk.Frame(parent)
         bar.pack(fill="x", padx=16, pady=(0, 4))
         ttk.Button(bar, text="↻ Reload", command=self.reload).pack(side="left")
         ttk.Button(bar, text="All", command=lambda: self.set_all(True)).pack(side="left", padx=(8, 0))
         ttk.Button(bar, text="None", command=lambda: self.set_all(False)).pack(side="left", padx=(4, 0))
+        ttk.Label(bar, text="Sort:", style="Sub.TLabel").pack(side="left", padx=(12, 2))
+        self.var_sort = tk.StringVar(value=SORT_MODES[0])
+        cmb_sort = ttk.Combobox(bar, textvariable=self.var_sort, state="readonly",
+                                width=12, values=SORT_MODES)
+        cmb_sort.pack(side="left")
+        cmb_sort.bind("<<ComboboxSelected>>", lambda e: self._resort())
         self.lbl_count = ttk.Label(bar, text="", style="Sub.TLabel")
         self.lbl_count.pack(side="right")
         wrap = ttk.Frame(parent)
@@ -57,6 +72,8 @@ class SystemListPanel:
         for w in self.inner.winfo_children():
             w.destroy()
         self.vars = {}
+        self.missing = {}
+        self._rows = {}
         root = self.get_root()
         systems = hdb.list_systems(root) if root else []
         if not systems:
@@ -67,16 +84,42 @@ class SystemListPanel:
         for s_name in systems:
             var = tk.BooleanVar(value=self.preselect)
             self.vars[s_name] = var
-            ttk.Checkbutton(self.inner, text=s_name, variable=var).pack(
-                anchor="w", padx=8, pady=(1, 0))
+            chk = ttk.Checkbutton(self.inner, text=s_name, variable=var)
+            lbl = None
             if self.stats:
                 lbl = ttk.Label(self.inner, text="analyzing…",
                                 style="Miss.TLabel")
-                lbl.pack(anchor="w", padx=28, pady=(0, 2))
                 self._stat_labels[s_name] = lbl
+            self._rows[s_name] = [chk, lbl]
+        self._resort()
         self.lbl_count.configure(text=f"{len(systems)} system(s)")
         if self.stats and systems and self.get_cfg:
             self._run_stats(systems)
+
+    def _sorted_names(self):
+        names = list(self._rows)
+        mode = self.var_sort.get()
+        if mode == "Name Z→A":
+            return sorted(names, key=str.casefold, reverse=True)
+        if mode in ("Missing asc", "Missing desc"):
+            return sorted(names,
+                          key=lambda s: (self.missing.get(s, 0), s.casefold()),
+                          reverse=(mode == "Missing desc"))
+        return sorted(names, key=str.casefold)
+
+    def _resort(self):
+        """Re-pack every row in the current sort order (selection state
+        lives in the vars and survives re-packing untouched)."""
+        for chk, lbl in self._rows.values():
+            chk.pack_forget()
+            if lbl:
+                lbl.pack_forget()
+        for s_name in self._sorted_names():
+            chk, lbl = self._rows[s_name]
+            chk.pack(anchor="w", padx=8, pady=(1, 0))
+            if lbl:
+                lbl.pack(anchor="w", padx=28, pady=(0, 2))
+        self.canvas.yview_moveto(0)
 
     def _run_stats(self, systems):
         """Missing wheels/videos per system, computed off the UI thread so
@@ -100,6 +143,10 @@ class SystemListPanel:
                         lbl = self._stat_labels.get(nm)
                         if not lbl or gen != self._stats_gen:
                             return
+                        # numeric key for the Missing sort: a complete
+                        # system is 0, else the line's first number
+                        m = re.search(r"\d+", t)
+                        self.missing[nm] = 0 if k else (int(m.group(0)) if m else 0)
                         try:
                             lbl.configure(text=t,
                                           style="OK.TLabel" if k else "Miss.TLabel")
@@ -120,6 +167,7 @@ class SystemListPanel:
                     lbl = self._stat_labels.get(nm)
                     if not lbl or gen != self._stats_gen:
                         return
+                    self.missing[nm] = (a + b + (r or 0)) if g else 0
                     try:
                         if g == 0:
                             lbl.configure(text="no games in database",
@@ -149,6 +197,15 @@ class SystemListPanel:
                         lbl.after(0, update)
                     except tk.TclError:
                         return   # widget destroyed by a Reload - stale run
+            # analysis done: a Missing sort chosen before the counts were
+            # known can now order for real
+            def final_resort():
+                if gen == self._stats_gen and self.var_sort.get().startswith("Missing"):
+                    self._resort()
+            try:
+                self.canvas.after(0, final_resort)
+            except tk.TclError:
+                pass
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1170,6 +1227,13 @@ class ClinicApp(tk.Tk):
         ttk.Button(bar, text="↻ Reload", command=self._rv_refresh).pack(side="left")
         ttk.Button(bar, text="All", command=lambda: self._rv_all(True)).pack(side="left", padx=(8, 0))
         ttk.Button(bar, text="None", command=lambda: self._rv_all(False)).pack(side="left", padx=(4, 0))
+        ttk.Label(bar, text="Sort:", style="Sub.TLabel").pack(side="left", padx=(12, 2))
+        self.var_rv_sort = tk.StringVar(value="Name A→Z")
+        cmb_rv = ttk.Combobox(bar, textvariable=self.var_rv_sort, state="readonly",
+                              width=12, values=("Name A→Z", "Name Z→A",
+                                                "Changes asc", "Changes desc"))
+        cmb_rv.pack(side="left")
+        cmb_rv.bind("<<ComboboxSelected>>", lambda e: self._rv_refresh())
         self.lbl_rv_count = ttk.Label(bar, text="", style="Sub.TLabel")
         self.lbl_rv_count.pack(side="right")
 
@@ -1210,13 +1274,14 @@ class ClinicApp(tk.Tk):
 
     def _rv_refresh(self):
         from clinic import reverter
+        prev = {s: v.get() for s, v in self.rv_vars.items()}   # keep ticks across re-sorts
         for w in self.rv_inner.winfo_children():
             w.destroy()
         self.rv_vars = {}
         cats = {k for k, v in self.rv_cats.items() if v.get()}
         summary = reverter.changes_summary(self.cfg)
-        shown = 0
-        for system in sorted(summary):
+        entries = []
+        for system in summary:
             sys_cats = summary[system]
             relevant = {c: n for c, n in sys_cats.items()
                         if not cats or c in cats}
@@ -1224,7 +1289,18 @@ class ClinicApp(tk.Tk):
                 continue
             desc = ", ".join(f"{reverter.CATEGORIES.get(c, c)}: {n}"
                              for c, n in sorted(relevant.items()))
-            var = tk.BooleanVar(value=False)
+            entries.append((system, desc, sum(relevant.values())))
+        mode = self.var_rv_sort.get()
+        if mode == "Name Z→A":
+            entries.sort(key=lambda e: e[0].casefold(), reverse=True)
+        elif mode in ("Changes asc", "Changes desc"):
+            entries.sort(key=lambda e: (e[2], e[0].casefold()),
+                         reverse=(mode == "Changes desc"))
+        else:
+            entries.sort(key=lambda e: e[0].casefold())
+        shown = 0
+        for system, desc, _count in entries:
+            var = tk.BooleanVar(value=prev.get(system, False))
             self.rv_vars[system] = var
             ttk.Checkbutton(self.rv_inner, text=f"{system}  ({desc})",
                             variable=var).pack(anchor="w", padx=8, pady=1)

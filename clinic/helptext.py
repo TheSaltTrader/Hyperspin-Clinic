@@ -61,6 +61,10 @@ HELP = """HYPERSPIN CLINIC — HOW EVERYTHING WORKS
 Reads every system from Databases\\Main Menu\\Main Menu.xml — NOTHING
 is pre-selected, on this or any tab, so an accidental Start can never
 run on the whole collection; tick what you want (or press All).
+Every tab's system list has a SORT selector: by system name (A-Z is
+the default, or Z-A) or by the analysis line's missing count,
+ascending or descending — sort "Missing desc" to see the systems
+needing the most work first. Re-sorting never touches your ticks.
 (Legacy Databases\\Main\\Main.xml also recognized.) The
 main menu database is the SINGLE source of truth on every tab: a
 system folder that exists on disk but is not listed there is never
