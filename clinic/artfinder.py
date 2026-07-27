@@ -219,6 +219,7 @@ _BAD_TITLE = re.compile(r"review|reaction|commentary|let.?s play|face ?cam"
 _BAD_CHANNEL = re.compile(r"IGN|GameSpot|GameTrailers|Kotaku|Polygon|GameXplain", re.I)
 
 _YT_HINT_RE = re.compile(r"needs to be reloaded|Sign in to confirm", re.I)
+_YT_COOKIE_RE = re.compile(r"cookie database|could not decrypt", re.I)
 
 
 def _tnorm(s):
@@ -226,7 +227,12 @@ def _tnorm(s):
 
 
 def _yt_hint(stderr_text, log):
-    if _YT_HINT_RE.search(stderr_text):
+    if _YT_COOKIE_RE.search(stderr_text):
+        log("    HINT: your browser's cookie store can't be read — "
+            "Chrome-family browsers lock/encrypt it (yt-dlp issue 7271). "
+            "In Setup > YouTube sign-in, select an exported cookies.txt "
+            "(most reliable) or Firefox, or fully close the browser.")
+    elif _YT_HINT_RE.search(stderr_text):
         log("    HINT: YouTube is refusing anonymous/outdated clients — "
             "update yt-dlp (pip install -U yt-dlp) and/or configure "
             "YouTube sign-in on the Setup tab")
