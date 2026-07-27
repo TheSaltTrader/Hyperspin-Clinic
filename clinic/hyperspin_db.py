@@ -14,11 +14,18 @@ from dataclasses import dataclass, field
 
 
 def read_db_text(path: str):
-    """Read a HyperSpin XML preserving its real encoding. Many community
-    DBs are cp1252, not UTF-8; decoding as UTF-8 with errors=replace and
-    rewriting would permanently mangle every accented character. Returns
+    """Read a HyperSpin XML preserving its real encoding. Community DBs
+    come in UTF-8, cp1252 AND UTF-16 (HyperHQ/front-end exports); decoding
+    the wrong way either mangles accents permanently or (UTF-16 read as
+    UTF-8) yields NUL-riddled text no regex can match. Returns
     (text, encoding) so writes can round-trip losslessly."""
     raw = open(path, "rb").read()
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16"), "utf-16"
+    if b"\x00" in raw[:200]:
+        return raw.decode("utf-16-le", errors="replace"), "utf-16-le"
+    if raw[:3] == b"\xef\xbb\xbf":
+        return raw.decode("utf-8-sig"), "utf-8-sig"
     for enc in ("utf-8", "cp1252"):
         try:
             return raw.decode(enc), enc
@@ -53,8 +60,10 @@ def _safe_system(name: str) -> bool:
     """System names become path components everywhere (Databases\\<Sys>,
     Media\\<Sys>, suite -BaseDir args, revert restore targets). A tampered
     Main.xml must not be able to escape the HyperSpin folder (OWASP path
-    traversal) or hit reserved Windows device names."""
-    if not name or name.strip() != name:
+    traversal) or hit reserved Windows device names. Callers strip
+    whitespace BEFORE validating (sloppy real-world Main.xml entries have
+    trailing spaces - those are still legitimate systems)."""
+    if not name:
         return False
     if name != os.path.basename(name):
         return False
@@ -65,23 +74,31 @@ def _safe_system(name: str) -> bool:
     return True
 
 
+def main_xml_path(hyperspin_root: str) -> str:
+    dbs = databases_dir(hyperspin_root)
+    return os.path.join(dbs, "Main", "Main.xml") if dbs else ""
+
+
 def list_systems(hyperspin_root: str) -> list:
     """System names from Databases\\Main\\Main.xml - the SINGLE source of
     truth (user rule): only systems listed there are worked on, on every
     tab. No folder-scan fallback; names that are not a single safe path
-    component are dropped."""
-    dbs = databases_dir(hyperspin_root)
-    if not dbs:
-        return []
-    main = os.path.join(dbs, "Main", "Main.xml")
-    if not os.path.isfile(main):
+    component are dropped. Encoding-tolerant (UTF-8/UTF-16/cp1252) and
+    attribute-order-tolerant (name= anywhere inside the <game> tag)."""
+    main = main_xml_path(hyperspin_root)
+    if not main or not os.path.isfile(main):
         return []
     try:
-        text = open(main, encoding="utf-8", errors="replace").read()
-        systems = re.findall(r'<game\s+name\s*=\s*"([^"]+)"', text)
+        text = read_db_text(main)[0]
+        systems = re.findall(r'<game\b[^>]*?\bname\s*=\s*"([^"]+)"', text)
     except Exception:
         return []
-    return [s for s in systems if _safe_system(s)]
+    out = []
+    for s in systems:
+        s = s.strip()
+        if _safe_system(s) and s not in out:
+            out.append(s)
+    return out
 
 
 def system_xml_path(hyperspin_root: str, system: str) -> str:

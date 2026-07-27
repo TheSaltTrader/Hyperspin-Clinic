@@ -74,12 +74,14 @@ def chroma_dir() -> str:
 
 
 def games_count(root: str, system: str) -> int:
-    """Number of <game> entries in a system's database XML (0 if absent)."""
+    """Number of <game> entries in a system's database XML (0 if absent).
+    Encoding-tolerant via read_db_text (UTF-8 / UTF-16 / cp1252)."""
     import re as _re
+    from . import hyperspin_db as hdb
     p = os.path.join(root, "Databases", system, system + ".xml")
     try:
-        with open(p, encoding="utf-8", errors="replace") as f:
-            return len(_re.findall(r'<game\s+name\s*=', f.read()))
+        text = hdb.read_db_text(p)[0]
+        return len(_re.findall(r'<game\b[^>]*?\bname\s*=', text))
     except OSError:
         return 0
 
@@ -94,8 +96,9 @@ def inspect_hyperspin(root: str) -> dict:
     Returns a summary dict: {valid, media, systems: [{name, themes, snaps,
     games}]}"""
     from . import hyperspin_db as hdb
-    out = {"valid": False, "media": "", "systems": []}
+    out = {"valid": False, "media": "", "systems": [], "reason": ""}
     if not root or not os.path.isdir(root):
+        out["reason"] = "That folder does not exist."
         return out
     game_root = root
     if os.path.basename(root.rstrip("\\/")).lower() == "media":
@@ -105,6 +108,17 @@ def inspect_hyperspin(root: str) -> dict:
         media = os.path.join(game_root, "Media")
     systems = hdb.list_systems(game_root)
     if not systems:
+        # tell the user PRECISELY what failed - "invalid" alone sends
+        # people hunting the wrong problem
+        if not hdb.databases_dir(game_root):
+            out["reason"] = ("No Databases folder found under "
+                             f"{game_root}.")
+        elif not os.path.isfile(hdb.main_xml_path(game_root)):
+            out["reason"] = ("Databases\\Main\\Main.xml not found under "
+                             f"{game_root}.")
+        else:
+            out["reason"] = ("Databases\\Main\\Main.xml contains no "
+                             "readable <game name=\"...\"> entries.")
         return out
     for name in systems:
         themes = snaps = 0

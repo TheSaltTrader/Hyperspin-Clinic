@@ -317,14 +317,20 @@ class ClinicApp(tk.Tk):
                                          wraplength=500, justify="left")
         self.lbl_root_status.pack(anchor="w", pady=(4, 0), **pad)
 
-        self.tree = ttk.Treeview(tab, columns=("games",),
-                                 show="headings", height=5)
+        treewrap = ttk.Frame(tab)
+        treewrap.pack(fill="x", pady=(8, 6), **pad)
+        self.tree = ttk.Treeview(treewrap, columns=("games",),
+                                 show="headings", height=6)
         self.tree.heading("games", text="Games")
         self.tree.column("games", width=90, anchor="e")
         self.tree["show"] = ("tree", "headings")
         self.tree.heading("#0", text="System")
         self.tree.column("#0", width=260)
-        self.tree.pack(fill="x", pady=(8, 6), **pad)
+        tree_sb = ttk.Scrollbar(treewrap, orient="vertical",
+                                command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_sb.set)
+        self.tree.pack(side="left", fill="x", expand=True)
+        tree_sb.pack(side="right", fill="y")
 
         # --- RocketLauncher folder (centralized rom locations) ---
         ttk.Label(tab, text="RocketLauncher folder", style="H.TLabel").pack(anchor="w", **pad)
@@ -1348,8 +1354,9 @@ class ClinicApp(tk.Tk):
         info = config.inspect_hyperspin(root)
         if not info["valid"]:
             self.lbl_root_status.configure(
-                text="✗ No HyperSpin systems found - select the HyperSpin "
-                     "folder that contains Media and Databases.",
+                text="✗ " + (info.get("reason") or "No HyperSpin systems "
+                     "found - select the HyperSpin folder that contains "
+                     "Media and Databases."),
                 foreground=BAD)
             return
         n_sys = len(info["systems"])
