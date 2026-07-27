@@ -20,6 +20,12 @@ DEFAULTS = {
     # metadata fill well at a fraction of the cost; pick a bigger model
     # in Setup if you want it
     "model": "claude-haiku-4-5",
+    # YouTube sign-in for yt-dlp when YouTube blocks anonymous downloads:
+    # a browser whose cookies yt-dlp reads directly, or an exported
+    # cookies.txt file. Only these NON-SECRET choices are stored - the
+    # cookies themselves stay in the browser / the user's file.
+    "youtube_cookies_browser": "",
+    "youtube_cookies_file": "",
 }
 
 

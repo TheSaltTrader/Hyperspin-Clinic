@@ -438,9 +438,54 @@ class ClinicApp(tk.Tk):
         self.lbl_emu_status.pack(side="left")
         ttk.Button(row5, text="Remove", command=self._remove_emu).pack(side="right")
 
+        ttk.Separator(tab).pack(fill="x", pady=6, **pad)
+
+        # --- YouTube sign-in (yt-dlp cookies) ---
+        ttk.Label(tab, text="YouTube sign-in", style="H.TLabel").pack(anchor="w", **pad)
+        ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
+            "The Missing Art tab falls back to YouTube for video snaps. "
+            "YouTube periodically blocks anonymous downloads for a while "
+            "(HTTP 403 / “sign in to confirm”) — signing in avoids the "
+            "wait. Pick the browser where you are logged in to YouTube "
+            "(yt-dlp reads its cookies directly; Firefox is the most "
+            "reliable on Windows), or select an exported cookies.txt file "
+            "(used instead of the browser when both are set). Cookies are "
+            "only ever read locally by yt-dlp — nothing is stored by "
+            "this app.")
+        ).pack(anchor="w", pady=(0, 6), **pad)
+        rowy = ttk.Frame(tab)
+        rowy.pack(fill="x", pady=(2, 2), **pad)
+        ttk.Label(rowy, text="Browser:", style="Sub.TLabel").pack(side="left")
+        self.var_yt_browser = tk.StringVar(
+            value=self.cfg.get("youtube_cookies_browser", "") or "(none)")
+        self.cmb_yt_browser = ttk.Combobox(
+            rowy, textvariable=self.var_yt_browser, state="readonly", width=12,
+            values=("(none)", "firefox", "chrome", "edge", "brave",
+                    "opera", "vivaldi"))
+        self.cmb_yt_browser.pack(side="left", padx=(6, 0))
+        self.cmb_yt_browser.bind("<<ComboboxSelected>>",
+                                 lambda e: self._save_youtube())
+        rowy2 = ttk.Frame(tab)
+        rowy2.pack(fill="x", pady=(4, 2), **pad)
+        ttk.Label(rowy2, text="cookies.txt:", style="Sub.TLabel").pack(side="left")
+        self.var_yt_cookies = tk.StringVar(
+            value=self.cfg.get("youtube_cookies_file", ""))
+        ent_yt = ttk.Entry(rowy2, textvariable=self.var_yt_cookies)
+        ent_yt.pack(side="left", fill="x", expand=True, padx=(6, 0), ipady=3)
+        ent_yt.bind("<FocusOut>", lambda e: self._save_youtube())
+        ent_yt.bind("<Return>", lambda e: self._save_youtube())
+        ttk.Button(rowy2, text="Browse…",
+                   command=self._browse_yt_cookies).pack(side="left", padx=(8, 0))
+        ttk.Button(rowy2, text="Clear",
+                   command=self._clear_youtube).pack(side="left", padx=(4, 0))
+        self.lbl_yt_status = ttk.Label(tab, text="", style="Status.TLabel",
+                                       wraplength=500, justify="left")
+        self.lbl_yt_status.pack(anchor="w", pady=(4, 6), **pad)
+
         self._refresh_root_status(initial=True)
         self._refresh_key_status()
         self._refresh_emu_status()
+        self._refresh_yt_status()
 
     def _save_emu(self):
         try:
@@ -466,6 +511,53 @@ class ClinicApp(tk.Tk):
         else:
             self.lbl_emu_status.configure(
                 text="No credentials stored (username + password).", foreground=SUBTLE)
+
+    # ---------- Setup: YouTube sign-in ----------
+    def _save_youtube(self):
+        browser = self.var_yt_browser.get()
+        self.cfg["youtube_cookies_browser"] = ("" if browser == "(none)"
+                                               else browser)
+        self.cfg["youtube_cookies_file"] = self.var_yt_cookies.get().strip()
+        config.save(self.cfg)
+        self._refresh_yt_status()
+
+    def _browse_yt_cookies(self):
+        p = filedialog.askopenfilename(
+            title="Select the exported cookies.txt",
+            filetypes=[("cookies.txt", "*.txt"), ("All files", "*.*")])
+        if p:
+            self.var_yt_cookies.set(p)
+            self._save_youtube()
+
+    def _clear_youtube(self):
+        self.var_yt_browser.set("(none)")
+        self.var_yt_cookies.set("")
+        self._save_youtube()
+
+    def _refresh_yt_status(self):
+        from clinic.artfinder import cookies_file_usable
+        f = self.cfg.get("youtube_cookies_file", "")
+        b = self.cfg.get("youtube_cookies_browser", "")
+        if f and os.path.isfile(f) and cookies_file_usable(f):
+            self.lbl_yt_status.configure(
+                text=f"✓ Using cookies.txt: {f}", foreground=OK)
+        elif f and os.path.isfile(f):
+            self.lbl_yt_status.configure(
+                text="That cookies.txt has no signed-in YouTube cookies — "
+                     "export it from a browser that is signed in to "
+                     "YouTube. It will be IGNORED until then.", foreground=BAD)
+        elif f:
+            self.lbl_yt_status.configure(
+                text=f"cookies.txt not found: {f} — sign-in is OFF until "
+                     "the file exists.", foreground=BAD)
+        elif b:
+            self.lbl_yt_status.configure(
+                text=f"✓ Using {b} cookies when YouTube requires sign-in.",
+                foreground=OK)
+        else:
+            self.lbl_yt_status.configure(
+                text="No sign-in configured — YouTube downloads run "
+                     "anonymously.", foreground=SUBTLE)
 
     # ---------- Systems tab ----------
     def _build_systems(self, tab):

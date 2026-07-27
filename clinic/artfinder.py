@@ -7,7 +7,9 @@
 #        region-title aliases (missing-only, files are COPIED to the
 #        canonical name, existing art is never swapped)
 #        EMUMOVIES FTP: video snaps folder + Logos pack for wheels
-#        YOUTUBE (videos only): yt-dlp search fallback, when installed
+#        YOUTUBE (videos only): yt-dlp search fallback, when installed;
+#        snap-length (<7 min) results preferred, optional sign-in cookies
+#        from Setup when YouTube blocks anonymous downloads
 #   4. wheel curation: trim alpha bbox, squeeze horizontally x0.75 (16:9
 #      convention) and normalize to 400px wide
 #   5. every addition -> UI log + data\art_additions.log + a tracking
@@ -162,23 +164,67 @@ def _ytdlp():
     return shutil.which("yt-dlp")
 
 
-def youtube_video(desc, dst_path, log):
+def cookies_file_usable(path):
+    """A cookies.txt without SIGNED-IN youtube.com cookies makes YouTube
+    403 every request — worse than staying anonymous (verified live; and
+    yt-dlp writes anonymous session cookies back into the file, so the
+    mere presence of youtube.com lines proves nothing). Require one of
+    the cookies only a signed-in export carries."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read(131072)
+    except OSError:
+        return False
+    if "youtube.com" not in text:
+        return False
+    return any(c in text for c in ("LOGIN_INFO", "SAPISID", "__Secure-3PAPISID"))
+
+
+def _yt_auth_args(cfg):
+    """YouTube sign-in from Setup: an exported cookies.txt wins, else the
+    chosen browser's cookies. Empty when nothing is configured (or the
+    file is unusable) — anonymous downloads, exactly the pre-1.3.2
+    behavior."""
+    cfg = cfg or {}
+    cookie_file = (cfg.get("youtube_cookies_file") or "").strip()
+    browser = (cfg.get("youtube_cookies_browser") or "").strip()
+    if cookie_file and os.path.isfile(cookie_file) and cookies_file_usable(cookie_file):
+        return ["--cookies", cookie_file]
+    if browser:
+        return ["--cookies-from-browser", browser]
+    return []
+
+
+def youtube_video(desc, dst_path, log, cfg=None):
     yt = _ytdlp()
     if not yt:
         return False
-    q = f"ytsearch1:{desc} arcade gameplay"
     tmp = dst_path + ".yt.mp4"
+    base = _yt_auth_args(cfg) + [
+            "-f", "mp4[height<=480]/best[height<=480]", "-o", tmp,
+            "--no-playlist", "--quiet", "--no-warnings",
+            "--retries", "3", "--fragment-retries", "3"]
+    # Two passes: snap-length videos (<7 min) from the top 5 results first
+    # (long-plays are skipped, transient 403s fall through to the next
+    # candidate); then the old any-length top result, so a game never
+    # loses its video to the duration filter.
+    attempts = (
+        [yt, f"ytsearch5:{desc} arcade gameplay", "--ignore-errors",
+         "--match-filter", "duration<420", "--max-downloads", "1"] + base,
+        [yt, f"ytsearch1:{desc} arcade gameplay"] + base,
+    )
     try:
-        # CREATE_NO_WINDOW: yt-dlp (and the ffmpeg it spawns) must never
-        # flash a console at the user - activity shows in the log pane
-        r = subprocess.run(
-            [yt, q, "-f", "mp4[height<=480]/best[height<=480]", "-o", tmp,
-             "--no-playlist", "--quiet", "--no-warnings"],
-            capture_output=True, timeout=300,
-            creationflags=0x08000000)
-        if r.returncode == 0 and os.path.isfile(tmp):
-            os.replace(tmp, dst_path)
-            return True
+        for cmd in attempts:
+            # CREATE_NO_WINDOW: yt-dlp (and the ffmpeg it spawns) must never
+            # flash a console at the user - activity shows in the log pane
+            r = subprocess.run(cmd, capture_output=True, timeout=300,
+                              creationflags=0x08000000)
+            # yt-dlp only renames its .part file to tmp on a completed
+            # download, so the file's existence is the success signal
+            # (--max-downloads exits 101 even when it succeeded)
+            if os.path.isfile(tmp):
+                os.replace(tmp, dst_path)
+                return True
         log(f"    youtube: no result ({r.stderr.decode(errors='replace')[-80:].strip()})")
     except Exception as e:
         log(f"    youtube error: {e}")
@@ -317,7 +363,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                             continue
                         dst = os.path.join(folder, g.name + ".mp4")
                         title = g.description or g.name
-                        if youtube_video(title, dst, log):
+                        if youtube_video(title, dst, log, cfg):
                             added.append({"system": system, "game": g.name,
                                           "art": art, "source": "youtube",
                                           "path": dst})
