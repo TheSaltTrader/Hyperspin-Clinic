@@ -115,7 +115,11 @@ The fun stuff. The tab reads every game system from
 `Databases\Main Menu\Main Menu.xml` (legacy `Databases\Main\Main.xml`
 also recognized) and lists them with checkboxes — **nothing
 pre-selected** (on any tab — an accidental Start can never run on the
-whole collection; use *All* to select everything).
+whole collection; use *All* to select everything). Every tab's system
+list is **sortable**: by name (A→Z default, or Z→A) or by the analysis
+line's missing count (asc/desc — *Missing desc* surfaces the systems
+needing the most work). Re-sorting preserves your selections; the
+Revert tab sorts by name or by change count the same way.
 The main menu database is the **single source of truth on every tab**:
 a system folder that exists on disk but is not listed there is never
 shown or touched. Press **Start enrichment** and, for each checked system:
