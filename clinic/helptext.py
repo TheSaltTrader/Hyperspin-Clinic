@@ -21,7 +21,7 @@ HELP = """HYPERSPIN CLINIC — HOW EVERYTHING WORKS
 • RocketLauncher folder: rom locations are read from RocketLauncher's
   per-system settings (Settings\\<System>\\Emulators.ini, Rom_Path,
   honoring Rom_Extension and multiple | separated paths). Powers the
-  missing-rom analysis in the system lists and rom renaming - one
+  rom renaming on the Rename tab - one
   centralized place, no per-tab rom browsing.
 • EmuMovies account: username + password for files.emumovies.com (plain
   FTP per the knowledge base). Stored encrypted the same way. Used by
@@ -70,9 +70,8 @@ pre-selected). Sources are tried in the knowledge base's order:
  2. EMUMOVIES — video snaps (HQ → SQ → HD folders) and the system's
     Logos pack for wheels (downloaded once, cached).
  3. YOUTUBE — videos only, via yt-dlp when installed.
-The red analysis line under each system shows missing wheels, videos
-and (when RocketLauncher is configured) roms - so you can see at a
-glance which system needs the most work.
+The red analysis line under each system shows missing wheels and
+videos - so you can see at a glance which system needs the most work.
 Every downloaded wheel is curated: transparent border trimmed,
 horizontal ×0.75 squeeze (16:9 display convention), resized to 400 px
 wide. Every addition is logged (data\\art_additions.log), tracked in

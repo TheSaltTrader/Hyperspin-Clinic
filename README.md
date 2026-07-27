@@ -85,9 +85,8 @@ The tab's sole goal is configuring the application:
   RocketLauncher's own per-system settings
   (`Settings\<System>\Emulators.ini` → `Rom_Path`, honoring
   `Rom_Extension` and multiple `|`-separated paths). This centralizes rom
-  locations: the system lists show a **missing-rom count** per system and
-  the Rename tab's rom mode uses these paths directly (its own rom
-  browser was removed).
+  locations: the Rename tab's rom mode uses these paths directly (its
+  own rom browser was removed). Missing roms are not listed on any tab.
 
 `settings.json` holds only non-secret configuration (folder path, engine
 URLs, model choice).

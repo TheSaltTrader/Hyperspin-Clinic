@@ -209,17 +209,9 @@ def missing_counts(cfg, system):
                 if f.lower().endswith(exts):
                     present.add(os.path.splitext(f)[0].lower())
         out.append(sum(1 for g in games if g.name.lower() not in present))
-    # roms via RocketLauncher settings (None when RL is not configured or
-    # has no rom path for this system)
-    from . import rocketlauncher as rl_mod
-    mr = None
-    try:
-        r = rl_mod.missing_roms(cfg, system)
-        if r is not None:
-            mr = r[1]
-    except Exception:
-        mr = None
-    return (len(games), out[0], out[1], mr)
+    # missing roms are NOT listed anywhere (user rule) - the rom slot
+    # stays None; RocketLauncher paths are still used by the Rename tab
+    return (len(games), out[0], out[1], None)
 
 
 # ---------- the per-system pass ----------
