@@ -70,7 +70,48 @@ def _claude(cfg):
     return anthropic.Anthropic(api_key=key)
 
 
-def _ask_batch(client, cfg, system, games, examples=None, log=None):
+def _parse_reply(text, games):
+    """Model reply -> {canonical_rom_name: fields}.
+    Hardened after the 'Favorites: 136 games never enriched' report:
+      - a reply cut off at the token cap has no closing ']' — salvage
+        every complete object instead of silently dropping the batch
+      - echoed names are matched back to the batch case-insensitively
+        (an echo of "PacMan" for rom "pacman" must still land)"""
+    m = re.search(r"\[.*\]", text, re.S)
+    items = None
+    if m:
+        try:
+            items = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            items = None
+    if items is None:
+        items = []
+        for om in re.finditer(r"\{[^{}]*\}", text, re.S):
+            try:
+                items.append(json.loads(om.group(0)))
+            except json.JSONDecodeError:
+                pass
+    real = {}
+    for g in games:
+        real[g.name.lower()] = g.name
+        if g.description:
+            real.setdefault(g.description.strip().lower(), g.name)
+    out = {}
+    for item in items:
+        if not (isinstance(item, dict) and item.get("name")):
+            continue
+        key = real.get(str(item["name"]).strip().lower())
+        if key is None:
+            continue
+        out[key] = {
+            "year": str(item.get("year", "") or "")[:4],
+            "manufacturer": str(item.get("manufacturer", "") or "")[:80],
+            "genre": str(item.get("genre", "") or "")[:40],
+        }
+    return out
+
+
+def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0):
     entries = "\n".join(
         f'- name="{g.name}" description="{g.description}"' for g in games)
     # RAG grounding: retrieved examples of already-complete entries from
@@ -85,9 +126,11 @@ def _ask_batch(client, cfg, system, games, examples=None, log=None):
         ground = ("\nExisting entries from this database (match their style "
                   "and vocabulary):\n" + ex + "\n")
     model = cfg.get("model", "claude-haiku-4-5")
+    # 8000 (was 4000): a 40-game reply that outgrew the cap lost the WHOLE
+    # batch silently — the cause of large "never enriched" gaps
     resp = client.messages.create(
         model=model,
-        max_tokens=4000,
+        max_tokens=8000,
         messages=[{"role": "user",
                    "content": PROMPT.format(system=system, entries=entries)
                    + ground}],
@@ -110,21 +153,26 @@ def _ask_batch(client, cfg, system, games, examples=None, log=None):
         except Exception:
             pass
     text = "".join(b.text for b in resp.content if b.type == "text")
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
-        return {}
-    try:
-        arr = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return {}
-    out = {}
-    for item in arr:
-        if isinstance(item, dict) and item.get("name"):
-            out[str(item["name"])] = {
-                "year": str(item.get("year", "") or "")[:4],
-                "manufacturer": str(item.get("manufacturer", "") or "")[:80],
-                "genre": str(item.get("genre", "") or "")[:40],
-            }
+    out = _parse_reply(text, games)
+    truncated = resp.stop_reason == "max_tokens"
+    unanswered = [g for g in games if g.name not in out]
+    if log and truncated:
+        log(f"    WARNING: AI reply hit the length cap — "
+            f"{len(unanswered)} game(s) unanswered")
+    elif log and not out:
+        log(f"    WARNING: could not parse the AI reply — "
+            f"{len(games)} game(s) unchanged this batch")
+    # a batch must never be lost silently: retry the unanswered remainder
+    # in halves (a shorter reply fits the cap; depth-capped so a stubborn
+    # failure cannot loop)
+    if unanswered and (truncated or not out) and depth < 3 and len(games) > 1:
+        if log:
+            log(f"    retrying {len(unanswered)} unanswered game(s) in "
+                f"smaller batches")
+        half = max(1, (len(unanswered) + 1) // 2)
+        for i in range(0, len(unanswered), half):
+            out.update(_ask_batch(client, cfg, system, unanswered[i:i + half],
+                                  examples, log, depth + 1))
     return out
 
 
@@ -202,6 +250,13 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
         log(f"[{system}] XML updated: {changed} game(s) (backup taken)")
     # refresh in-memory games with the new values before indexing
     games = hdb.parse_games(hdb.read_db_text(xml_path)[0])
+    # honest end-of-run count: "enriched 136/136" only tracks progress,
+    # it must never read as success when fields stayed empty
+    still = sum(1 for g in games if not (g.year and g.manufacturer and g.genre))
+    if missing and still:
+        log(f"[{system}] {still} game(s) STILL missing metadata — the "
+            f"model could not identify them (or their batches failed; "
+            f"see warnings above). Re-running only retries those games.")
     # skip the expensive full re-embed when nothing changed and the system
     # is already indexed (a no-op run on MAME would re-embed 30k+ games)
     already = False
