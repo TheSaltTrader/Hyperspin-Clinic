@@ -111,11 +111,21 @@ is pre-selected). Sources are tried in the knowledge base's order:
     swapped here.
  2. EMUMOVIES — video snaps (HQ → SQ → HD folders) and the system's
     Logos pack for wheels (downloaded once, cached).
- 3. YOUTUBE — videos only, via yt-dlp when installed. Snap-length
-    videos (under 7 minutes) are preferred over long-plays, with
-    retries across the top search results. If downloads fail with
-    HTTP 403 / "sign in to confirm", configure YouTube sign-in on
-    the Setup tab.
+ 3. LAUNCHBOX (wheels only) — transparent Clear Logos from the
+    LaunchBox Games Database (free, no account). Fills what EmuMovies
+    packs don't cover (MAME has no Logos pack). Every download is
+    decode-verified and must be genuinely transparent, then curated
+    like every wheel.
+ 4. YOUTUBE — videos only, via yt-dlp when installed. The finder
+    SEARCHES first and picks the best candidate itself (gameplay,
+    else a 2-minute slice of a longplay, else a trailer), rejecting
+    review/reaction titles and watermark channels, and requiring the
+    video title to actually contain the game name. The result is then
+    processed with FFMPEG (bundled with the Theme Suite): black bars
+    cropped, cut to a 60-second snap with fade in/out, normalized to
+    H.264. If downloads fail with "sign in to confirm" or "the page
+    needs to be reloaded", UPDATE yt-dlp (pip install -U yt-dlp)
+    and/or configure YouTube sign-in on the Setup tab.
 The red analysis line under each system shows missing wheels and
 videos - so you can see at a glance which system needs the most work.
 Every downloaded wheel is curated: transparent border trimmed,

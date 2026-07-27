@@ -174,12 +174,23 @@ through the sources in the knowledge base's order:
    for snaps and the system's `Logos` pack under `Official/Artwork/…` for
    wheels (pack downloaded once, cached). Credentials are entered in
    Setup and stored encrypted in the Credential Manager.
-3. **YouTube** (videos only) — `yt-dlp` search fallback when installed.
-   Snap-length videos (< 7 minutes) are preferred over long-plays: the
-   top 5 search results are tried with a duration filter (skipping past
-   transient HTTP 403s), then the old any-length top result as a last
-   resort. If YouTube blocks downloads with *"sign in to confirm"*,
-   configure **YouTube sign-in** on the Setup tab (see above).
+3. **LaunchBox Games DB** (wheels only) — transparent **Clear Logos**,
+   free, no account. Fills what EmuMovies packs don't cover (MAME has
+   no Logos pack). Downloads are decode-verified and must be genuinely
+   transparent (banner/tile fakes are rejected), then curated like any
+   wheel.
+4. **YouTube** (videos only) — `yt-dlp` search-then-pick (from the
+   Wheels2Add / XBLA media-pipeline knowledge base): a metadata-only
+   search, then the finder itself picks the best candidate — gameplay
+   first, else a **2-minute slice of a longplay** (`--download-sections`),
+   else a trailer — rejecting review/reaction titles and watermark
+   channels, and requiring the video title to contain the game name.
+   Every result is post-processed with **ffmpeg** (bundled with the
+   Theme Suite): multi-sample black-bar crop, cut to a **60-second
+   snap** with fade in/out, normalized to H.264/AAC. If YouTube blocks
+   with *"sign in to confirm"* / *"page needs to be reloaded"*, update
+   `yt-dlp` (`pip install -U yt-dlp`) and/or configure **YouTube
+   sign-in** on the Setup tab (see above).
 
 **Wheel curation** (every downloaded wheel): transparent border trimmed,
 horizontal **×0.75 squeeze** (so it displays correctly on the 16:9
