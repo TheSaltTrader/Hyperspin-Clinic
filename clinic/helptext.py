@@ -124,8 +124,12 @@ is pre-selected). Sources are tried in the knowledge base's order:
     processed with FFMPEG (bundled with the Theme Suite): black bars
     cropped, cut to a 60-second snap with fade in/out, normalized to
     H.264. If downloads fail with "sign in to confirm" or "the page
-    needs to be reloaded", UPDATE yt-dlp (pip install -U yt-dlp)
-    and/or configure YouTube sign-in on the Setup tab.
+    needs to be reloaded", UPDATE yt-dlp and/or configure YouTube
+    sign-in on the Setup tab.
+    YT-DLP UPDATES: at every startup the app checks for a new yt-dlp
+    release and ASKS before installing it (into data\\tools\\ - the
+    app's own copy, preferred over any system yt-dlp). Stale yt-dlp
+    is the #1 cause of YouTube failures; say yes when offered.
 The red analysis line under each system shows missing wheels and
 videos - so you can see at a glance which system needs the most work.
 Every downloaded wheel is curated: transparent border trimmed,
