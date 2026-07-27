@@ -608,6 +608,11 @@ class ClinicApp(tk.Tk):
                                     "(recent titles — ≈$0.01 per search, "
                                     "cost shown in the log)"),
                         variable=self.var_web_search).pack(anchor="w")
+        self.var_retry_failed = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts, text=("Retry games that previously failed "
+                                    "(they are cached and skipped for free "
+                                    "otherwise)"),
+                        variable=self.var_retry_failed).pack(anchor="w")
 
         run = ttk.Frame(tab)
         run.pack(fill="x", pady=(6, 4), **pad)
@@ -680,6 +685,7 @@ class ClinicApp(tk.Tk):
         total = len(selected)
         fill_empty = self.var_fill_empty.get()   # read on the UI thread
         web_search = self.var_web_search.get()
+        retry_failed = self.var_retry_failed.get()
         self.pb.configure(maximum=total * 100, value=0)
 
         def status(idx, frac, msg):
@@ -702,6 +708,7 @@ class ClinicApp(tk.Tk):
                             stop_flag=lambda: self._stop,
                             only_fill_empty=fill_empty,
                             web_search=web_search,
+                            retry_failed=retry_failed,
                             progress=lambda f, m, i=idx: status(i, f, m))
                     except enrich.StopRequested:
                         self._log("— stopped by user —")

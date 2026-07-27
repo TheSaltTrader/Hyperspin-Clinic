@@ -8,10 +8,13 @@
 #   4. upsert EVERY game into the vector DB and Elasticsearch under the
 #      system's name so the data is searchable and AI-updatable later
 import json
+import os
 import re
+import time
 
 import anthropic
 
+from . import config
 from . import es as es_mod
 from . import hyperspin_db as hdb
 from . import secrets, store
@@ -48,6 +51,41 @@ SEARCH_NOTE = (
 # second pass for games the model could not identify from knowledge:
 # smaller batches (searches add tokens fast)
 SEARCH_BATCH = 8
+
+
+# ---------- enrichment cache (cost control) ----------
+# Every answer - identified OR unidentifiable - is remembered in
+# data\enrich_cache.json, keyed by the game's normalized description:
+#  - identified games are reused FREE across runs and systems (Favorites
+#    duplicates other wheels' games; clone sets share one description)
+#  - games that stayed unknown even after web search are NOT re-searched
+#    on later runs (each retry costs real money) unless the user ticks
+#    "Retry games that previously failed"
+CACHE_FILE = "enrich_cache.json"
+
+
+def _cache_key(g) -> str:
+    s = (g.description or g.name).lower()
+    return re.sub(r"[^a-z0-9()]+", " ", s).strip()
+
+
+def _load_cache() -> dict:
+    try:
+        with open(os.path.join(config.DATA_DIR, CACHE_FILE), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_cache(cache: dict) -> None:
+    try:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        p = os.path.join(config.DATA_DIR, CACHE_FILE)
+        with open(p + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        os.replace(p + ".tmp", p)
+    except Exception:
+        pass   # cache is an optimization - never fail the run over it
 
 
 class StopRequested(Exception):
@@ -144,8 +182,10 @@ def _ask_batch(client, cfg, system, games, examples=None, log=None, depth=0,
     model = cfg.get("model", "claude-haiku-4-5")
     kwargs = {}
     if web_search:
+        # ONE search per game: at ~$0.01/search a 2x allowance doubled the
+        # worst-case bill for no measurable gain (6/6 filled with 1 each)
         kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search",
-                            "max_uses": min(24, 2 * len(games))}]
+                            "max_uses": min(12, len(games))}]
     # 8000 (was 4000): a 40-game reply that outgrew the cap lost the WHOLE
     # batch silently — the cause of large "never enriched" gaps
     resp = client.messages.create(
@@ -233,7 +273,7 @@ def _index_games(cfg, system, games):
 
 
 def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=None,
-                  web_search=False):
+                  web_search=False, retry_failed=False):
     """Enrich one system. log: callable(msg). stop_flag: callable() -> bool.
     Returns summary dict."""
     xml_path = hdb.system_xml_path(cfg["hyperspin_root"], system)
@@ -246,35 +286,66 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
     missing = [g for g in games
                if not (g.year and g.manufacturer and g.genre)]
     log(f"[{system}] {len(games)} games, {len(missing)} missing metadata")
-    client = _claude(cfg) if missing else None
+    updates = {}
+    # ---- cost control: cache + clone dedup (no API call for any of it) --
+    cache = _load_cache()
+    cached_hits = skipped_failed = 0
+    groups = {}          # cache_key -> [games]  (clones share one answer)
+    for g in missing:
+        key = _cache_key(g)
+        hit = cache.get(key)
+        if hit and hit.get("year") and hit.get("manufacturer") and hit.get("genre"):
+            updates[g.name] = {"year": hit["year"],
+                               "manufacturer": hit["manufacturer"],
+                               "genre": hit["genre"]}
+            cached_hits += 1
+            continue
+        if hit and hit.get("status") == "failed" and not retry_failed:
+            skipped_failed += 1
+            continue
+        groups.setdefault(key, []).append(g)
+    to_ask = [gs[0] for gs in groups.values()]   # one representative per clone group
+    dup_saved = sum(len(gs) - 1 for gs in groups.values())
+    if cached_hits:
+        log(f"[{system}] {cached_hits} game(s) filled FREE from the "
+            f"enrichment cache (previous runs / other systems)")
+    if skipped_failed:
+        log(f"[{system}] {skipped_failed} game(s) skipped — previously "
+            f"unidentifiable even with web search (tick 'Retry games "
+            f"that previously failed' to search them again)")
+    if dup_saved:
+        log(f"[{system}] {dup_saved} clone/duplicate game(s) share a "
+            f"batch entry — answered once, applied to all")
+    client = _claude(cfg) if to_ask else None
     # retrieval pool for RAG grounding: complete entries from this system
     complete = [g for g in games if g.year and g.manufacturer and g.genre]
     examples = complete[:8]
-    updates = {}
     if progress:
-        progress(0.0, f"{system}: {len(missing)} game(s) to enrich")
-    for i in range(0, len(missing), BATCH):
+        progress(0.0, f"{system}: {len(to_ask)} game(s) to enrich")
+    for i in range(0, len(to_ask), BATCH):
         if stop_flag():
             raise StopRequested()
-        part = missing[i:i + BATCH]
+        part = to_ask[i:i + BATCH]
         if progress:
-            progress(i / max(1, len(missing)),
+            progress(i / max(1, len(to_ask)),
                      f"{system}: asking AI — batch {i // BATCH + 1}/"
-                     f"{(len(missing) + BATCH - 1) // BATCH}")
+                     f"{(len(to_ask) + BATCH - 1) // BATCH}")
         try:
             updates.update(_ask_batch(client, cfg, system, part, examples,
                                       log=log))
         except anthropic.APIError as e:
             log(f"[{system}] batch {i // BATCH + 1}: API error {e.__class__.__name__} — continuing")
-        log(f"[{system}] enriched {min(i + BATCH, len(missing))}/{len(missing)}")
+        log(f"[{system}] enriched {min(i + BATCH, len(to_ask))}/{len(to_ask)}")
     # -- second pass: web-search the games the model could not identify
     # from its own knowledge (typically recent 2024+ releases past the
     # model's training data). Opt-out via the Systems tab checkbox.
+    def _unresolved():
+        return [g for g in to_ask
+                if not all((getattr(g, f) or updates.get(g.name, {}).get(f))
+                           for f in ("year", "manufacturer", "genre"))]
+    web_searched = set()
     if web_search:
-        unresolved = [
-            g for g in missing
-            if not all((getattr(g, f) or updates.get(g.name, {}).get(f))
-                       for f in ("year", "manufacturer", "genre"))]
+        unresolved = _unresolved()
         if unresolved:
             log(f"[{system}] {len(unresolved)} game(s) unidentified from "
                 f"model knowledge — retrying with WEB SEARCH "
@@ -283,6 +354,7 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
                 if stop_flag():
                     raise StopRequested()
                 part = unresolved[i:i + SEARCH_BATCH]
+                web_searched.update(g.name for g in part)
                 if progress:
                     progress(0.5 + 0.4 * i / max(1, len(unresolved)),
                              f"{system}: web-searching — batch "
@@ -297,6 +369,20 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
                         f"{e.__class__.__name__} — continuing")
                 log(f"[{system}] web-searched "
                     f"{min(i + SEARCH_BATCH, len(unresolved))}/{len(unresolved)}")
+    # ---- propagate representative answers to their clone group + cache --
+    stamp = time.strftime("%Y-%m-%d")
+    for key, gs in groups.items():
+        rep = gs[0]
+        r = updates.get(rep.name)
+        if r and r.get("year") and r.get("manufacturer") and r.get("genre"):
+            cache[key] = {"year": r["year"], "manufacturer": r["manufacturer"],
+                          "genre": r["genre"], "ts": stamp}
+            for g in gs[1:]:
+                updates.setdefault(g.name, dict(r))
+        elif rep.name in web_searched:
+            # web search itself came up empty: remember, don't re-bill
+            cache[key] = {"status": "failed", "ts": stamp}
+    _save_cache(cache)
     if progress:
         progress(0.9, f"{system}: writing XML + indexing")
     changed = 0
