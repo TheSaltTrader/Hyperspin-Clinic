@@ -97,14 +97,17 @@ class EmuMovies:
         # opportunistic TLS (OWASP transport security): try FTPS with
         # protected data channel first; fall back to plain FTP only when
         # the server refuses, and say so
+        # latin-1: EmuMovies has legacy cp1252 filenames (0x86 etc.) that
+        # crash ftplib's default utf-8 listing decode; latin-1 is a
+        # lossless byte mapping so names round-trip for RETR too
         try:
-            ftps = ftplib.FTP_TLS(HOST, timeout=30)
+            ftps = ftplib.FTP_TLS(HOST, timeout=30, encoding="latin-1")
             ftps.login(user, password)
             ftps.prot_p()
             self.ftp = ftps
             log("  EmuMovies: connected over FTPS (encrypted)")
         except Exception:
-            self.ftp = ftplib.FTP(HOST, timeout=30)
+            self.ftp = ftplib.FTP(HOST, timeout=30, encoding="latin-1")
             self.ftp.login(user, password)
             log("  EmuMovies: connected over plain FTP (server does not "
                 "offer TLS - credentials/content are unencrypted)")
@@ -126,16 +129,6 @@ class EmuMovies:
         out = [n.rsplit("/", 1)[-1] for n in names]
         self._dir_cache[path] = out
         return out
-
-    # ---------- full-tree crawl (train-the-software support) ----------
-    def crawl_tree(self):
-        """{'video': {root: [folders]}, 'artwork': [folders], 'ts': ...} -
-        every location EmuMovies offers, for the map/DB and inspection."""
-        tree = {"video": {}, "artwork": [], "ts": time.strftime("%Y-%m-%d %H:%M")}
-        for root in VIDEO_ROOTS:
-            tree["video"][root] = self.listdir(root)
-        tree["artwork"] = self.listdir(ARTWORK_ROOT)
-        return tree
 
     # ---------- videos ----------
     def find_video_dirs(self, system):

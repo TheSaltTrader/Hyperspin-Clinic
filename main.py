@@ -868,6 +868,8 @@ class ClinicApp(tk.Tk):
 
         run = ttk.Frame(tab)
         run.pack(fill="x", pady=(6, 4), **pad)
+        ttk.Button(run, text="⟳ EmuMovies catalog",
+                   command=self._rebuild_emucat).pack(side="right")
         self.btn_art_start = ttk.Button(run, text="▶ Find missing art", command=self._start_art)
         self.btn_art_start.pack(side="left")
         self.btn_art_stop = ttk.Button(run, text="■ Stop", command=lambda: setattr(self, "_art_stop", True),
@@ -887,6 +889,28 @@ class ClinicApp(tk.Tk):
     def _art_log(self, msg):
         self._logq.put(("art", msg))
 
+    def _rebuild_emucat(self):
+        """Manual full-catalog refresh (it also refreshes itself weekly
+        whenever EmuMovies is used)."""
+        from clinic import emucatalog, emumovies as emu_mod
+        creds = secrets.load_emumovies()
+        if not creds:
+            messagebox.showwarning(
+                "EmuMovies", "Store EmuMovies credentials in Setup first.")
+            return
+        self._art_log("EmuMovies catalog: full-tree extraction starting "
+                      "(a few minutes)…")
+        cfg = dict(self.cfg)
+
+        def work():
+            try:
+                emucatalog.build(
+                    cfg, lambda: emu_mod.EmuMovies(*creds, log=self._art_log),
+                    self._art_log)
+            except Exception as e:
+                self._art_log(f"catalog rebuild failed: {e}")
+        threading.Thread(target=work, daemon=True).start()
+
     def _start_art(self):
         selected = self.art_list.selected()
         if not selected:
@@ -894,6 +918,7 @@ class ClinicApp(tk.Tk):
             return
         if self.art_opts["emumovies"].get() and not secrets.emumovies_stored():
             self._art_log("note: no EmuMovies credentials stored (Setup tab) — that source will be skipped")
+        artfinder._yt_reset_block_state()   # cooldown state is per RUN
         self._art_stop = False
         self.btn_art_start.configure(state="disabled")
         self.btn_art_stop.configure(state="normal")

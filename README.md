@@ -176,11 +176,14 @@ through the sources in the knowledge base's order:
    for wheels. System names resolve **vendor-tolerantly** ("Dreamcast" →
    "Sega Dreamcast (Video Snaps)(HD)"); every resolved location is
    remembered in `data\emumovies_map.json` (hand-editable — this is how
-   you *train* the software), the **full FTP tree** is crawled weekly to
-   `data\emumovies_tree.json` and indexed into the database, and with
-   Elasticsearch running the needed games are **fuzzy-verified** against
-   the listing. Region renames are aliased (Jet Set Radio ↔ Jet Grind
-   Radio). Credentials are entered in Setup and stored encrypted.
+   you *train* the software). The **full catalog** — every folder *and*
+   every file in it (160k+ snaps) — is extracted to
+   `data\emumovies_catalog.json` (weekly, or on demand via the
+   *EmuMovies catalog* button), indexed **per file into Elasticsearch**
+   and summarized in the vector DB: lookups are direct catalog queries,
+   FTP is used only for the actual downloads. Region renames are aliased
+   (Jet Set Radio ↔ Jet Grind Radio). Credentials are entered in Setup
+   and stored encrypted.
 3. **LaunchBox Games DB** (wheels only) — transparent **Clear Logos**,
    free, no account. Fills what EmuMovies packs don't cover (MAME has
    no Logos pack). Downloads are decode-verified and must be genuinely
@@ -204,6 +207,12 @@ through the sources in the knowledge base's order:
    `data\tools\` (the app's own standalone copy, preferred over any
    system yt-dlp — no Python/pip needed). Stale yt-dlp is the #1 cause
    of YouTube failures.
+
+   **Refusal cooldown**: when YouTube starts refusing downloads
+   (bot-throttle waves), the finder waits it out with escalating
+   cooldowns (5 → 15 → 45 → 90 min; Stop stays responsive), probes,
+   and retries the same game once the block lifts — only a block that
+   outlasts the longest cooldown disables YouTube for the run.
 
 **Wheel curation** (every downloaded wheel): transparent border trimmed,
 horizontal **×0.75 squeeze** (so it displays correctly on the 16:9

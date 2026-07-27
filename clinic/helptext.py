@@ -115,12 +115,16 @@ is pre-selected). Sources are tried in the knowledge base's order:
     missing there automatically falls back to HQ/SQ). System names
     are matched vendor-tolerantly ("Dreamcast" finds "Sega Dreamcast
     (Video Snaps)(HD)"), every resolved location is REMEMBERED in
-    data\\emumovies_map.json (hand-editable to train the software),
-    the full FTP tree is crawled weekly into
-    data\\emumovies_tree.json and indexed in the database, and when
-    Elasticsearch is running the needed games are fuzzy-VERIFIED
-    against the folder listing. Region renames are handled (Jet Set
-    Radio ↔ Jet Grind Radio).
+    data\\emumovies_map.json (hand-editable to train the software).
+    The FULL CATALOG — every folder AND every file in it — is
+    extracted to data\\emumovies_catalog.json (weekly, or the
+    "EmuMovies catalog" button), indexed per file into Elasticsearch
+    and summarized in the vector DB, so lookups are direct catalog
+    queries instead of runtime guessing; FTP is only used for the
+    actual downloads. Region renames are handled (Jet Set Radio ↔
+    Jet Grind Radio). If YouTube starts refusing downloads, an
+    escalating COOLDOWN (5→90 min, Stop stays responsive) waits the
+    block out and retries automatically.
  3. LAUNCHBOX (wheels only) — transparent Clear Logos from the
     LaunchBox Games Database (free, no account). Fills what EmuMovies
     packs don't cover (MAME has no Logos pack). Every download is

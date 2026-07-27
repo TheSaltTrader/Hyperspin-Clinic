@@ -230,6 +230,18 @@ _BAD_CHANNEL = re.compile(r"IGN|GameSpot|GameTrailers|Kotaku|Polygon|GameXplain"
 
 _YT_HINT_RE = re.compile(r"needs to be reloaded|Sign in to confirm", re.I)
 _YT_COOKIE_RE = re.compile(r"cookie database|could not decrypt", re.I)
+_YT_BLOCK_RE = re.compile(r"HTTP Error 403|Sign in to confirm|"
+                          r"needs to be reloaded|429", re.I)
+
+# YouTube bot-throttle cooldown (knowledge base: refusal waves lift after
+# a 50-90 min cooldown; sign-in cookies avoid them entirely). Escalating
+# waits; the state is per-run (reset in find_for_system).
+_YT_COOLDOWNS = (300, 900, 2700, 5400)          # 5 / 15 / 45 / 90 min
+_YT_BLOCK = {"hit": False, "consec": 0, "level": 0, "off": False}
+
+
+def _yt_reset_block_state():
+    _YT_BLOCK.update(hit=False, consec=0, level=0, off=False)
 
 
 def _tnorm(s):
@@ -237,6 +249,8 @@ def _tnorm(s):
 
 
 def _yt_hint(stderr_text, log):
+    if _YT_BLOCK_RE.search(stderr_text):
+        _YT_BLOCK["hit"] = True
     if _YT_COOKIE_RE.search(stderr_text):
         log("    HINT: your browser's cookie store can't be read — "
             "Chrome-family browsers lock/encrypt it (yt-dlp issue 7271). "
@@ -246,6 +260,35 @@ def _yt_hint(stderr_text, log):
         log("    HINT: YouTube is refusing anonymous/outdated clients — "
             "update yt-dlp (pip install -U yt-dlp) and/or configure "
             "YouTube sign-in on the Setup tab")
+
+
+def _yt_cooldown(log, check_stop, yt, auth):
+    """Wait out a refusal wave (Stop stays responsive), then probe. True
+    when YouTube answers again."""
+    lvl = min(_YT_BLOCK["level"], len(_YT_COOLDOWNS) - 1)
+    wait = _YT_COOLDOWNS[lvl]
+    _YT_BLOCK["level"] += 1
+    log(f"    YOUTUBE COOLDOWN: downloads are being refused — waiting "
+        f"{wait // 60} min before retrying (blocks lift on their own; "
+        f"YouTube sign-in in Setup avoids them entirely)")
+    t0 = time.time()
+    last_note = 0
+    while time.time() - t0 < wait:
+        if check_stop:
+            check_stop()
+        time.sleep(15)
+        gone = time.time() - t0
+        if gone - last_note >= 300:
+            last_note = gone
+            log(f"    cooldown: {int((wait - gone) // 60) + 1} min remaining…")
+    _YT_BLOCK["hit"] = False
+    probe = _yt_search(yt, "ytsearch1:classic arcade gameplay", auth,
+                       lambda m: None)
+    if probe and not _YT_BLOCK["hit"]:
+        log("    cooldown over — YouTube is responding again")
+        return True
+    log("    cooldown ended but YouTube is still refusing")
+    return False
 
 
 def _yt_search(yt, query, auth, log):
@@ -361,12 +404,18 @@ def _snap_transcode(src, dst, log, max_len=60):
     return "raw (transcode failed)"
 
 
-def youtube_video(desc, dst_path, log, cfg=None):
+def youtube_video(desc, dst_path, log, cfg=None, check_stop=None):
     """Search-then-pick ladder from the media-pipeline knowledge base:
     snap-length gameplay, else a 2-minute section of a longplay, else a
-    trailer - every result cropped/cut to a 60s snap by ffmpeg."""
+    trailer - every result cropped/cut to a 60s snap by ffmpeg. When
+    YouTube starts refusing downloads, an escalating COOLDOWN waits the
+    block out and retries (user rule)."""
     yt = _ytdlp()
     if not yt:
+        return False
+    if _YT_BLOCK["off"]:
+        log("    youtube: skipped — refusals persisted through every "
+            "cooldown this run")
         return False
     from . import launchbox
     title = launchbox.clean_title(desc)
@@ -377,7 +426,8 @@ def youtube_video(desc, dst_path, log, cfg=None):
         (f"ytsearch6:{title} longplay", 600, None, "*00:01:00-00:03:00"),
         (f"ytsearch6:{title} trailer", 45, 300, None),
     )
-    try:
+
+    def attempt():
         for query, lo, hi, section in ladder:
             pick = _pick(_yt_search(yt, query, auth, log), title, lo, hi)
             if not pick:
@@ -398,6 +448,30 @@ def youtube_video(desc, dst_path, log, cfg=None):
             return True
         _yt_hint(r.stderr.decode(errors="replace"), log)
         log(f"    youtube: no result ({r.stderr.decode(errors='replace')[-80:].strip()})")
+        return False
+
+    try:
+        while True:
+            _YT_BLOCK["hit"] = False
+            if attempt():
+                _YT_BLOCK["consec"] = 0
+                _YT_BLOCK["level"] = 0
+                return True
+            if not _YT_BLOCK["hit"]:
+                return False          # genuine no-result, not a refusal
+            _YT_BLOCK["consec"] += 1
+            if _YT_BLOCK["consec"] < 2:
+                return False          # single flake: move on, no wait yet
+            if _YT_BLOCK["level"] >= len(_YT_COOLDOWNS):
+                _YT_BLOCK["off"] = True
+                log("    youtube: still refused after the longest cooldown "
+                    "— disabled for the rest of this run")
+                return False
+            if not _yt_cooldown(log, check_stop, yt, auth):
+                continue              # next round escalates the wait
+            # block lifted: retry this same game
+    except StopRequested:
+        raise
     except Exception as e:
         log(f"    youtube error: {e}")
     finally:
@@ -456,6 +530,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
         jobs.append(("video", paths["video"], VIDEO_EXTS))
 
     emu = None
+    emu_cat = None
     try:
         for job_i, (art, folder, exts) in enumerate(jobs):
             check_stop()
@@ -513,14 +588,18 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                         try:
                             emu = emu_mod.EmuMovies(*creds, log=log)
                             log(f"[{system}] EmuMovies: connected")
-                            _index_emumovies_tree(cfg, emu, log)
+                            from . import emucatalog
+                            emu_cat = emucatalog.ensure(
+                                cfg,
+                                lambda: emu_mod.EmuMovies(*creds, log=log),
+                                log, stop_flag)
                         except Exception as e:
                             log(f"[{system}] EmuMovies: connection failed ({e})")
                             emu = False
                     if emu:
                         missing = _from_emumovies(
                             cfg, emu, system, art, folder, missing,
-                            added, log, check_stop)
+                            added, log, check_stop, cat=emu_cat)
 
             # -- 3) LaunchBox GamesDB clear logos (wheels only) --
             # knowledge base: transparent clear logos, free, no API key;
@@ -564,7 +643,8 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                             continue
                         dst = os.path.join(folder, g.name + ".mp4")
                         title = g.description or g.name
-                        if youtube_video(title, dst, log, cfg):
+                        if youtube_video(title, dst, log, cfg,
+                                         check_stop=check_stop):
                             added.append({"system": system, "game": g.name,
                                           "art": art, "source": "youtube",
                                           "path": dst})
@@ -579,39 +659,6 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
             emu.close()
         _track(cfg, added, log)
     return {"system": system, "added": len(added)}
-
-
-def _index_emumovies_tree(cfg, emu, log):
-    """Refresh data\\emumovies_tree.json (every location for every system)
-    and index it into the database - the user-requested 'train the
-    software' pass. Best-effort, at most once a week."""
-    import json as _json
-    import time as _time
-    path = os.path.join(config.DATA_DIR, "emumovies_tree.json")
-    try:
-        age = _time.time() - os.path.getmtime(path)
-        if age < 7 * 86400:
-            return
-    except OSError:
-        pass
-    try:
-        tree = emu.crawl_tree()
-        os.makedirs(config.DATA_DIR, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            _json.dump(tree, f, indent=1)
-        n = sum(len(v) for v in tree["video"].values()) + len(tree["artwork"])
-        log(f"  EmuMovies: full tree crawled — {n} folders saved to "
-            f"emumovies_tree.json")
-        from .ingest import Chunk
-        chunks = [Chunk(
-            id=f"emutree:{re.sub(r'[^a-z0-9]+', '-', root.lower())}",
-            text=f"EmuMovies folders under {root}: " + "; ".join(names),
-            source=path, kind="emumovies_tree", meta={"root": root},
-        ) for root, names in (list(tree["video"].items())
-                              + [(emu_mod.ARTWORK_ROOT, tree["artwork"])])]
-        store.track(cfg, chunks, log)
-    except Exception as e:
-        log(f"  EmuMovies tree crawl skipped: {e}")
 
 
 # region-rename aliases from the media-pipeline knowledge base (EU/JP
@@ -637,34 +684,50 @@ def _alias_title(desc):
     return REGION_ALIASES.get(key)
 
 
-def _from_emumovies(cfg, emu, system, art, folder, missing, added, log, check_stop):
+def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
+                    check_stop, cat=None):
     still = list(missing)
     if art == "video":
-        vdirs = emu.find_video_dirs(system)
-        if not vdirs:
+        # THE CATALOG FIRST (user rule: no assumptions) - the extracted
+        # tree knows every folder and every file; FTP is only used for
+        # the actual downloads. Live listing is the fallback.
+        raw_pools = []
+        from . import emucatalog
+        for vd, fl in emucatalog.video_pools(cat, system):
+            raw_pools.append((vd, fl, "catalog"))
+        if not raw_pools:
+            for vd in emu.find_video_dirs(system):
+                raw_pools.append((vd, emu.list_videos(vd), "live"))
+        if not raw_pools:
             log(f"[{system}] EmuMovies: no video-snap folder matched — if "
                 f"one exists, add it to data\\emumovies_map.json under "
                 f"'video::{system}'")
             return still
         # highest quality first, PER GAME: HD sets are often WIP and
         # incomplete, so each game cascades HD -> HQ -> SQ (user rule)
-        pools, filedir, all_files = [], {}, []
-        for vd in vdirs:
-            fl = emu.list_videos(vd)
+        pools, filedir = [], {}
+        for vd, fl, origin in raw_pools:
             pools.append((vd, {norm(f): f for f in fl}))
             for f in fl:
                 filedir.setdefault(f, vd)
-                all_files.append(f)
-            log(f"[{system}] EmuMovies: {len(fl)} snaps in {vd}")
-        # ES verification (user rule): fuzzy-match the needed games
-        # against the combined listing with Elasticsearch when available;
-        # difflib remains the first, offline-safe matcher
+            log(f"[{system}] EmuMovies: {len(fl)} snaps in {vd} ({origin})")
+        # ES verification (user rule): direct pull from the indexed
+        # catalog when available; transient index as fallback; difflib
+        # remains the first, offline-safe matcher
         es_map = None
-        if es_mod.available(cfg):
+        cat_es = emucatalog.es_candidates(
+            cfg, system, [vd for vd, _ in pools], still, n=3)
+        if cat_es is not None:
+            es_map = cat_es
+            log(f"[{system}] EmuMovies: candidates pulled from the "
+                f"Elasticsearch catalog index")
+        elif es_mod.available(cfg):
             try:
                 from . import renamer
-                es_map = renamer._es_candidates(cfg, list(filedir), still, n=3)
-                if es_map is not None:
+                raw = renamer._es_candidates(cfg, list(filedir), still, n=3)
+                if raw is not None:
+                    es_map = {k: [(filedir[c], c) for c in v if c in filedir]
+                              for k, v in raw.items()}
                     log(f"[{system}] EmuMovies: listing indexed in "
                         f"Elasticsearch for fuzzy verification")
             except Exception:
@@ -685,11 +748,11 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log, check_st
                     break
             if not src and es_map:
                 from .renamer import _pct
-                for cand in es_map.get(g.name, []):
+                for fdir, cand in es_map.get(g.name, []):
                     score = max(_pct(g.name, cand),
                                 _pct(g.description or g.name, cand))
                     if score >= 60:
-                        src, src_dir = cand, filedir[cand]
+                        src, src_dir = cand, fdir
                         via = f"emumovies es-match {score}%"
                         break
             if src and safe_name(g.name):
