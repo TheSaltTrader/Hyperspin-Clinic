@@ -39,6 +39,11 @@ class StopRequested(Exception):
     pass
 
 
+class IndexingUnavailable(Exception):
+    """Vector indexing failed (embedder/runtime unavailable). The XML
+    update is already complete - callers warn and continue."""
+
+
 def metadata_stats_line(cfg, system):
     """(text, ok) for the Systems tab list: ONLY metadata completeness -
     how many games still miss year / manufacturer / genre."""
@@ -139,8 +144,14 @@ def _index_games(cfg, system, games):
             meta={"game": g.name, "system": system, "year": g.year,
                   "manufacturer": g.manufacturer, "genre": g.genre},
         ))
-    col = store.collection(cfg)
-    store.add_chunks(col, chunks)
+    # indexing must NEVER block the real work - the XML update already
+    # succeeded; a broken embedder (missing runtime, no model) degrades
+    # to keyword-only search instead of failing the run
+    try:
+        col = store.collection(cfg)
+        store.add_chunks(col, chunks)
+    except Exception as e:
+        raise IndexingUnavailable(str(e))
     if es_mod.available(cfg):
         es_mod.ensure_index(cfg)
         es_mod.add_chunks(cfg, chunks)
@@ -205,8 +216,13 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
         log(f"[{system}] no changes - index already up to date, skipping reindex")
         es_ok = es_mod.available(cfg)
     else:
-        es_ok = _index_games(cfg, system, games)
-        log(f"[{system}] indexed {len(games)} games "
-            f"({'vector+elasticsearch' if es_ok else 'vector only — ES offline'})")
+        try:
+            es_ok = _index_games(cfg, system, games)
+            log(f"[{system}] indexed {len(games)} games "
+                f"({'vector+elasticsearch' if es_ok else 'vector only — ES offline'})")
+        except IndexingUnavailable as e:
+            log(f"[{system}] WARNING: search indexing unavailable "
+                f"({e}) - the XML metadata update itself SUCCEEDED; "
+                f"Ask AI/search will use keyword matching only")
     return {"system": system, "games": len(games), "updated": changed,
             "skipped": False}

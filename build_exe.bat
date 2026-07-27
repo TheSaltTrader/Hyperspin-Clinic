@@ -16,6 +16,8 @@ pip install pyinstaller
 pyinstaller --noconfirm --clean --onedir --windowed ^
   --name HyperSpinClinic ^
   --collect-all chromadb ^
+  --collect-all onnxruntime ^
+  --collect-all tokenizers ^
   --collect-all keyring ^
   --collect-all jsonschema ^
   --collect-all rfc3987_syntax ^
@@ -24,6 +26,13 @@ pyinstaller --noconfirm --clean --onedir --windowed ^
   --hidden-import keyring.backends.Windows ^
   --hidden-import PIL._tkinter_finder ^
   main.py
+echo.
+echo Bundling the embedding model (offline first-run indexing)...
+if exist "%USERPROFILE%\.cache\chroma\onnx_models\all-MiniLM-L6-v2\onnx" (
+  xcopy /E /I /Y /Q "%USERPROFILE%\.cache\chroma\onnx_models\all-MiniLM-L6-v2\onnx" "dist\HyperSpinClinic\onnx_models\all-MiniLM-L6-v2\onnx\"
+) else (
+  echo WARNING: local Chroma model cache not found - first indexing will download it.
+)
 echo.
 echo Bundling the Theme Suite next to the exe (auto-located at startup)...
 if exist "theme_suite" (

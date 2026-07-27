@@ -1,16 +1,50 @@
 # ChromaDB vector store wrapper (embedded, no server). Uses Chroma's
-# default embedding function (ONNX MiniLM, downloaded once on first use).
+# default embedding function (ONNX MiniLM). The packaged app ships the
+# model AND onnxruntime - the user never installs anything and never
+# needs internet for the first index.
 import functools
+import os
+import shutil
+import sys
 
 import chromadb
 
 from . import config
+
+_MODEL_SUBDIR = os.path.join("onnx_models", "all-MiniLM-L6-v2", "onnx")
+
+
+def seed_onnx_cache():
+    """Chroma's default embedder looks for its model in
+    ~/.cache/chroma/onnx_models/... and DOWNLOADS it when absent. The
+    release bundles the model next to the exe; copy it into the cache
+    once so first-time indexing works offline and instantly."""
+    try:
+        dst = os.path.join(os.path.expanduser("~"), ".cache", "chroma",
+                           _MODEL_SUBDIR)
+        if os.path.isdir(dst) and os.listdir(dst):
+            return True
+        app_dirs = []
+        if getattr(sys, "frozen", False):
+            app_dirs.append(os.path.dirname(sys.executable))
+        app_dirs.append(config.ROOT)
+        for base in app_dirs:
+            src = os.path.join(base, _MODEL_SUBDIR)
+            if os.path.isdir(src) and os.listdir(src):
+                os.makedirs(dst, exist_ok=True)
+                for f in os.listdir(src):
+                    shutil.copy2(os.path.join(src, f), os.path.join(dst, f))
+                return True
+    except Exception:
+        pass
+    return False
 
 
 @functools.lru_cache(maxsize=1)
 def _client_for(path):
     # PersistentClient construction is heavyweight (SQLite + ONNX embedder
     # context) - cache one per path instead of one per call
+    seed_onnx_cache()
     return chromadb.PersistentClient(path=path)
 
 
