@@ -114,10 +114,10 @@ def inspect_hyperspin(root: str) -> dict:
             out["reason"] = ("No Databases folder found under "
                              f"{game_root}.")
         elif not os.path.isfile(hdb.main_xml_path(game_root)):
-            out["reason"] = ("Databases\\Main\\Main.xml not found under "
-                             f"{game_root}.")
+            out["reason"] = ("Databases\\Main Menu\\Main Menu.xml not "
+                             f"found under {game_root}.")
         else:
-            out["reason"] = ("Databases\\Main\\Main.xml contains no "
+            out["reason"] = ("The main menu database contains no "
                              "readable <game name=\"...\"> entries.")
         return out
     for name in systems:

@@ -60,7 +60,7 @@ class SystemListPanel:
         if not systems:
             ttk.Label(self.inner, style="Sub.TLabel", text=(
                 "No systems found — save a valid HyperSpin folder in Setup "
-                "(needs Databases\\Main\\Main.xml).")).pack(anchor="w", padx=8, pady=8)
+                "(needs Databases\\Main Menu\\Main Menu.xml).")).pack(anchor="w", padx=8, pady=8)
         self._stat_labels = {}
         for s_name in systems:
             var = tk.BooleanVar(value=self.preselect)
@@ -458,7 +458,7 @@ class ClinicApp(tk.Tk):
         pad = {"padx": 16}
         ttk.Label(tab, text="Systems", style="H.TLabel").pack(anchor="w", pady=(16, 2), **pad)
         ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
-            "Systems from Databases\\Main\\Main.xml. All are pre-selected — "
+            "Systems from Databases\\Main Menu\\Main Menu.xml. All are pre-selected — "
             "untick any you want to skip, then Start: every game of each "
             "selected system gets its published year, manufacturer and genre "
             "filled in by AI, the system XML is updated (backup taken), and "

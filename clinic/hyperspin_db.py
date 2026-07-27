@@ -75,8 +75,17 @@ def _safe_system(name: str) -> bool:
 
 
 def main_xml_path(hyperspin_root: str) -> str:
+    """Real HyperSpin keeps the system list in Databases\\Main Menu\\
+    Main Menu.xml; older/simplified layouts use Databases\\Main\\Main.xml.
+    The first one that exists wins."""
     dbs = databases_dir(hyperspin_root)
-    return os.path.join(dbs, "Main", "Main.xml") if dbs else ""
+    if not dbs:
+        return ""
+    for sub, fname in (("Main Menu", "Main Menu.xml"), ("Main", "Main.xml")):
+        p = os.path.join(dbs, sub, fname)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(dbs, "Main Menu", "Main Menu.xml")
 
 
 def list_systems(hyperspin_root: str) -> list:

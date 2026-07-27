@@ -40,9 +40,11 @@ HELP = """HYPERSPIN CLINIC — HOW EVERYTHING WORKS
   the "Billing…" button opens the Anthropic console where it lives.
 
 ━━━ SYSTEMS (metadata enrichment) ━━━━━━━━━━━━
-Reads every system from Databases\\Main\\Main.xml — all pre-selected.
-Main.xml is the SINGLE source of truth on every tab: a system folder
-that exists on disk but is not listed in Main.xml is never touched.
+Reads every system from Databases\\Main Menu\\Main Menu.xml — all
+pre-selected (legacy Databases\\Main\\Main.xml also recognized). The
+main menu database is the SINGLE source of truth on every tab: a
+system folder that exists on disk but is not listed there is never
+touched.
 For each checked system, Start enrichment:
  1. parses Databases\\<System>\\<System>.xml (tolerant of sloppy XML),
  2. sends games missing year / manufacturer / genre to Claude in
