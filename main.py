@@ -465,10 +465,13 @@ class ClinicApp(tk.Tk):
             "the data is stored per system in the vector database and "
             "Elasticsearch.")).pack(anchor="w", pady=(0, 10), **pad)
 
-        # shared list panel with the red missing-art analysis per system
+        # Systems tab analysis = METADATA ONLY (user rule): how many games
+        # still miss year/manufacturer/genre - art/rom gaps live on their
+        # own tabs
         self.sys_list = SystemListPanel(
-            tab, height=260, stats=True,
-            get_cfg=lambda: self.cfg).bind_root(
+            tab, height=260,
+            get_cfg=lambda: self.cfg,
+            stats_fn=enrich.metadata_stats_line).bind_root(
             lambda: self.cfg.get("hyperspin_root", ""))
         self.sys_canvas = self.sys_list.canvas
 
@@ -796,7 +799,7 @@ class ClinicApp(tk.Tk):
         roms_dir = ""
         if target == "rom":
             from clinic import rocketlauncher as rl_mod
-            rl = self.cfg.get("rocketlauncher_root", "")
+            rl = rl_mod.effective_root(self.cfg)
             paths = rl_mod.rom_paths(rl, selected[0]) if rl else []
             paths = [q for q in paths if os.path.isdir(q)]
             if not paths:
@@ -1157,6 +1160,17 @@ class ClinicApp(tk.Tk):
         from clinic import rocketlauncher as rl_mod
         root = self.var_rl.get().strip()
         if not root:
+            # a cab keeps RocketLauncher inside the HyperSpin folder -
+            # pick it up automatically, no browsing needed
+            auto = rl_mod.effective_root(self.cfg)
+            if auto:
+                info = rl_mod.inspect(auto)
+                self.lbl_rl_status.configure(
+                    text=f"✓ Auto-detected under the HyperSpin folder "
+                         f"({auto}) - rom paths for {info['systems']} "
+                         f"system(s).",
+                    foreground=OK)
+                return
             self.lbl_rl_status.configure(
                 text="Not set - rom analysis and rom renaming disabled.",
                 foreground=SUBTLE)
@@ -1343,6 +1357,9 @@ class ClinicApp(tk.Tk):
                 root != self.cfg.get("hyperspin_root", ""):
             self.cfg["hyperspin_root"] = root
             config.save(self.cfg)
+            # RocketLauncher may live inside the newly picked folder
+            if hasattr(self, "lbl_rl_status"):
+                self._refresh_rl_status()
 
     def _refresh_root_status(self, initial=False):
         root = self.var_root.get().strip()

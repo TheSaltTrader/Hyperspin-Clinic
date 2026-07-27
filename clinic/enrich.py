@@ -39,6 +39,25 @@ class StopRequested(Exception):
     pass
 
 
+def metadata_stats_line(cfg, system):
+    """(text, ok) for the Systems tab list: ONLY metadata completeness -
+    how many games still miss year / manufacturer / genre."""
+    from . import hyperspin_db as hdb
+    xml = hdb.system_xml_path(cfg.get("hyperspin_root", ""), system)
+    try:
+        games = hdb.parse_games(hdb.read_db_text(xml)[0])
+    except OSError:
+        return "no database XML for this system", False
+    if not games:
+        return "no games in database", False
+    incomplete = sum(1 for g in games
+                     if not (g.year and g.manufacturer and g.genre))
+    if incomplete == 0:
+        return f"✓ metadata complete ({len(games)} games)", True
+    return (f"⚠ {incomplete} game(s) missing metadata "
+            f"of {len(games)}", False)
+
+
 def _claude(cfg):
     key = secrets.load()
     if not key:

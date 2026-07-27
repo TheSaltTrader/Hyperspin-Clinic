@@ -95,25 +95,45 @@ def rom_extensions(rl_root: str, system: str):
     return None
 
 
+def effective_root(cfg) -> str:
+    """The RocketLauncher root: the configured one, or auto-detected
+    inside the HyperSpin folder (real cabs keep it right there, e.g.
+    Arcade\\Rocketlauncher\\Settings\\...)."""
+    rl = (cfg.get("rocketlauncher_root") or "").strip()
+    if rl and looks_valid(rl):
+        return rl
+    hs = (cfg.get("hyperspin_root") or "").strip()
+    if hs:
+        for name in ("Rocketlauncher", "RocketLauncher", "RL"):
+            cand = os.path.join(hs, name)
+            if looks_valid(cand):
+                return cand
+    return ""
+
+
 def rom_files(rl_root: str, system: str):
-    """{lower stem: (folder, filename)} across all of the system's rom
-    folders (first folder wins on stem collisions - RL search order)."""
+    """{lower stem: (folder, name)} across all of the system's rom
+    folders (first folder wins on stem collisions - RL search order).
+    A rom can be a FILE (stem = name without extension, honoring
+    Rom_Extension when set) or a FOLDER named after the rom (disc dumps,
+    PC/PS3/Switch games live as directories)."""
     exts = rom_extensions(rl_root, system)
     out = {}
     for folder in rom_paths(rl_root, system):
         if not os.path.isdir(folder):
             continue
         try:
-            names = os.listdir(folder)
+            entries = list(os.scandir(folder))
         except OSError:
             continue
-        for f in names:
-            if exts and not f.lower().endswith(exts):
+        for e in entries:
+            if e.is_dir():
+                out.setdefault(e.name.lower(), (folder, e.name))
                 continue
-            if not os.path.isfile(os.path.join(folder, f)):
+            if exts and not e.name.lower().endswith(exts):
                 continue
-            stem = os.path.splitext(f)[0].lower()
-            out.setdefault(stem, (folder, f))
+            stem = os.path.splitext(e.name)[0].lower()
+            out.setdefault(stem, (folder, e.name))
     return out
 
 
@@ -121,7 +141,7 @@ def missing_roms(cfg, system):
     """(total_games, missing_count) using RL's configured rom folders;
     returns None when RocketLauncher is not configured or has no rom path
     for this system."""
-    rl = cfg.get("rocketlauncher_root", "")
+    rl = effective_root(cfg)
     if not rl or not rom_paths(rl, system):
         return None
     xml = hdb.system_xml_path(cfg["hyperspin_root"], system)
