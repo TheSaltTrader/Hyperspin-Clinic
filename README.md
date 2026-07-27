@@ -95,7 +95,9 @@ URLs, model choice).
 ### Systems (implemented)
 The fun stuff. The tab reads every game system from
 `Databases\Main\Main.xml` and lists them with checkboxes — **all
-pre-selected**. Press **Start enrichment** and, for each checked system:
+pre-selected**. `Main.xml` is the **single source of truth on every
+tab**: a system folder that exists on disk but is not listed there is
+never shown or touched. Press **Start enrichment** and, for each checked system:
 
 1. `Databases\<System>\<System>.xml` is parsed (tolerantly — HyperSpin
    XMLs are often sloppy; unescaped `&`, self-closing `<game/>` tags and

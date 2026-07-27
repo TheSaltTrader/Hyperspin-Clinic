@@ -88,49 +88,45 @@ def inspect_hyperspin(root: str) -> dict:
     """Identify what lives under a HyperSpin folder. The expected pick is
     the ACTUAL HyperSpin root (Media\\ and Databases\\ underneath); the
     Media folder itself is tolerated for robustness.
+    The system list is exactly Databases\\Main\\Main.xml (user rule: only
+    systems listed there are worked on, on every tab) - Media folders that
+    are not in Main.xml are ignored.
     Returns a summary dict: {valid, media, systems: [{name, themes, snaps,
     games}]}"""
+    from . import hyperspin_db as hdb
     out = {"valid": False, "media": "", "systems": []}
     if not root or not os.path.isdir(root):
         return out
+    game_root = root
+    if os.path.basename(root.rstrip("\\/")).lower() == "media":
+        game_root = os.path.dirname(root.rstrip("\\/"))
     media = ""
-    if os.path.isdir(os.path.join(root, "Media")):
-        media = os.path.join(root, "Media")
-    else:
-        # maybe the user picked Media itself (subfolders with Themes\)
-        try:
-            for e in os.scandir(root):
-                if e.is_dir() and os.path.isdir(os.path.join(e.path, "Themes")):
-                    media = root
-                    break
-        except OSError:
-            return out
-    if not media:
+    if os.path.isdir(os.path.join(game_root, "Media")):
+        media = os.path.join(game_root, "Media")
+    systems = hdb.list_systems(game_root)
+    if not systems:
         return out
-    for e in sorted(os.scandir(media), key=lambda x: x.name.lower()):
-        if not e.is_dir():
-            continue
-        themes_dir = os.path.join(e.path, "Themes")
-        if not os.path.isdir(themes_dir):
-            continue
-        try:
-            themes = sum(1 for f in os.scandir(themes_dir)
-                         if f.name.lower().endswith(".zip"))
-        except OSError:
-            themes = 0
-        video_dir = os.path.join(e.path, "Video")
-        snaps = 0
-        if os.path.isdir(video_dir):
-            try:
-                snaps = sum(1 for f in os.scandir(video_dir)
-                            if f.name.lower().endswith((".mp4", ".flv", ".avi")))
-            except OSError:
-                pass
-        game_root = os.path.dirname(media) if os.path.basename(
-            media).lower() == "media" else media
-        out["systems"].append({"name": e.name, "themes": themes,
+    for name in systems:
+        themes = snaps = 0
+        if media:
+            themes_dir = os.path.join(media, name, "Themes")
+            if os.path.isdir(themes_dir):
+                try:
+                    themes = sum(1 for f in os.scandir(themes_dir)
+                                 if f.name.lower().endswith(".zip"))
+                except OSError:
+                    pass
+            video_dir = os.path.join(media, name, "Video")
+            if os.path.isdir(video_dir):
+                try:
+                    snaps = sum(1 for f in os.scandir(video_dir)
+                                if f.name.lower().endswith(
+                                    (".mp4", ".flv", ".avi")))
+                except OSError:
+                    pass
+        out["systems"].append({"name": name, "themes": themes,
                                "snaps": snaps,
-                               "games": games_count(game_root, e.name)})
-    out["valid"] = bool(out["systems"])
+                               "games": games_count(game_root, name)})
+    out["valid"] = True
     out["media"] = media
     return out

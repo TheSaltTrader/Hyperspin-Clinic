@@ -66,23 +66,21 @@ def _safe_system(name: str) -> bool:
 
 
 def list_systems(hyperspin_root: str) -> list:
-    """System names from Databases\\Main\\Main.xml (fallback: folder scan).
-    Names that are not a single safe path component are dropped."""
+    """System names from Databases\\Main\\Main.xml - the SINGLE source of
+    truth (user rule): only systems listed there are worked on, on every
+    tab. No folder-scan fallback; names that are not a single safe path
+    component are dropped."""
     dbs = databases_dir(hyperspin_root)
     if not dbs:
         return []
     main = os.path.join(dbs, "Main", "Main.xml")
-    systems = []
-    if os.path.isfile(main):
-        try:
-            text = open(main, encoding="utf-8", errors="replace").read()
-            systems = re.findall(r'<game\s+name\s*=\s*"([^"]+)"', text)
-        except Exception:
-            systems = []
-    if not systems:
-        systems = [e.name for e in os.scandir(dbs)
-                   if e.is_dir() and e.name.lower() != "main"
-                   and os.path.isfile(os.path.join(e.path, e.name + ".xml"))]
+    if not os.path.isfile(main):
+        return []
+    try:
+        text = open(main, encoding="utf-8", errors="replace").read()
+        systems = re.findall(r'<game\s+name\s*=\s*"([^"]+)"', text)
+    except Exception:
+        return []
     return [s for s in systems if _safe_system(s)]
 
 
