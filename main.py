@@ -249,6 +249,40 @@ class ClinicApp(tk.Tk):
         self._style()
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        # user rule: verify yt-dlp freshness at every startup - stale
+        # yt-dlp is the #1 cause of YouTube art failures. Non-blocking:
+        # the check runs off-thread, the ASK happens on the UI thread.
+        self.after(1500, self._check_ytdlp)
+
+    def _check_ytdlp(self):
+        from clinic import artfinder, ytupdate
+
+        def work():
+            cur, latest = ytupdate.check(artfinder._ytdlp())
+            if latest:
+                self.after(0, lambda: self._offer_ytdlp(cur, latest))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _offer_ytdlp(self, cur, latest):
+        from clinic import ytupdate
+        msg = (f"A new yt-dlp version is available: {latest}"
+               + (f" (you have {cur})." if cur else
+                  " (no yt-dlp found on this machine).")
+               + "\n\nYouTube video retrieval breaks when yt-dlp is "
+               "outdated. Install the update into the application now?")
+        if not messagebox.askyesno("yt-dlp update", msg):
+            return
+
+        def work():
+            ok = ytupdate.download_latest(log=lambda m: None)
+            self.after(0, lambda: messagebox.showinfo(
+                "yt-dlp update",
+                f"yt-dlp {latest} installed — YouTube retrieval is up to date."
+                if ok else
+                "The update could not be downloaded — YouTube retrieval "
+                "will use the existing version. Check your connection "
+                "and restart the app to retry."))
+        threading.Thread(target=work, daemon=True).start()
 
     def _on_close(self):
         # signal workers so no rename/enrichment batch is killed mid-write

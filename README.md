@@ -189,8 +189,14 @@ through the sources in the knowledge base's order:
    Theme Suite): multi-sample black-bar crop, cut to a **60-second
    snap** with fade in/out, normalized to H.264/AAC. If YouTube blocks
    with *"sign in to confirm"* / *"page needs to be reloaded"*, update
-   `yt-dlp` (`pip install -U yt-dlp`) and/or configure **YouTube
-   sign-in** on the Setup tab (see above).
+   `yt-dlp` and/or configure **YouTube sign-in** on the Setup tab (see
+   above).
+
+   **yt-dlp stays fresh automatically**: at every startup the app
+   checks for a new yt-dlp release and asks before installing it into
+   `data\tools\` (the app's own standalone copy, preferred over any
+   system yt-dlp — no Python/pip needed). Stale yt-dlp is the #1 cause
+   of YouTube failures.
 
 **Wheel curation** (every downloaded wheel): transparent border trimmed,
 horizontal **×0.75 squeeze** (so it displays correctly on the 16:9

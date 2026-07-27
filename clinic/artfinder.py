@@ -161,6 +161,13 @@ def _track(cfg, entries, log):
 
 # ---------- youtube fallback (videos only) ----------
 def _ytdlp():
+    """App-managed copy first (data\\tools\\yt-dlp.exe, kept current by
+    the startup update check) so a stale system yt-dlp can't break
+    YouTube; PATH as fallback."""
+    from . import ytupdate
+    p = ytupdate.managed_exe()
+    if os.path.isfile(p):
+        return p
     return shutil.which("yt-dlp")
 
 
