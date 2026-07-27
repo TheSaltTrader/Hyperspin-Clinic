@@ -9,9 +9,11 @@ sk-ant-, then paste it in the Setup tab. Usage is billed to your account.)
 HELP = """HYPERSPIN CLINIC — HOW EVERYTHING WORKS
 
 ━━━ SETUP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• HyperSpin folder: Browse to your HyperSpin root (or its Media folder).
-  The app detects every system (Media\\<System>\\Themes + Video) and
-  shows a per-system summary before you save.
+• HyperSpin folder: select your ACTUAL HyperSpin folder - the one that
+  contains the Media and Databases folders (all system art lives under
+  Media\\<System>\\). The pick is validated and saved AUTOMATICALLY (no
+  Save button), and the table shows each detected system with its game
+  count. Picking the Media folder by mistake is corrected to its parent.
 • Claude API key: masked field + Add key. The key is stored ENCRYPTED in
   the Windows Credential Manager (per-user DPAPI) — never in a file,
   never logged, following OWASP secrets-management practice. Test key
@@ -24,9 +26,10 @@ HELP = """HYPERSPIN CLINIC — HOW EVERYTHING WORKS
 • EmuMovies account: username + password for files.emumovies.com (plain
   FTP per the knowledge base). Stored encrypted the same way. Used by
   the Missing Art tab.
-• Theme Suite folder: where the HyperSpin Theme Suite v3.7 lives
-  (the folder containing Convert-HyperSpin-Themes.ps1 and ThemeVideo\\).
-  Powers the Themes tab; the suite is used in place, never copied.
+• Theme Suite: nothing to configure - the suite SHIPS WITH the app
+  (theme_suite folder next to the exe) and is located automatically at
+  startup. It powers the Themes tab and runs in place, never copied
+  into your HyperSpin installation.
 • AI model & costs: choose which Claude model does the enrichment work.
   The DEFAULT IS THE CHEAPEST current model (Haiku) on purpose - pick a
   bigger one only if you want it. "Refresh list" pulls the live model
@@ -86,8 +89,9 @@ database, and the scrollable changes box (this run + history).
 
 ━━━ THEMES (Theme Suite v3.7) ━━━━━━━━━━━━━━━
 Integrates the HyperSpin Theme Suite, driven from the same global
-system list — the suite stays in its own folder (Setup: "Theme Suite
-folder"); nothing is copied into your HyperSpin installation.
+system list — the suite ships with the application (theme_suite folder,
+auto-located at startup); nothing is copied into your HyperSpin
+installation.
 The red analysis line under each system breaks down its themes the way
 the suite's converter classifies them — png (normal raster themes),
 flash (all-SWF, left untouched by the converter), video (the video IS

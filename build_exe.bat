@@ -25,5 +25,14 @@ pyinstaller --noconfirm --clean --onedir --windowed ^
   --hidden-import PIL._tkinter_finder ^
   main.py
 echo.
+echo Bundling the Theme Suite next to the exe (auto-located at startup)...
+if exist "theme_suite" (
+  xcopy /E /I /Y /Q "theme_suite" "dist\HyperSpinClinic\theme_suite\"
+) else if exist "..\Mame Project\Release" (
+  xcopy /E /I /Y /Q "..\Mame Project\Release" "dist\HyperSpinClinic\theme_suite\"
+) else (
+  echo WARNING: no Theme Suite found to bundle - the Themes tab will be disabled.
+)
+echo.
 echo Build done: dist\HyperSpinClinic\HyperSpinClinic.exe
 pause

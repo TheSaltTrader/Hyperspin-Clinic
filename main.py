@@ -34,13 +34,17 @@ class SystemListPanel:
         self.canvas = tk.Canvas(wrap, height=height, bg=BG, highlightthickness=1,
                                 highlightbackground="#dddddd")
         sb = ttk.Scrollbar(wrap, orient="vertical", command=self.canvas.yview)
+        hsb = ttk.Scrollbar(wrap, orient="horizontal", command=self.canvas.xview)
         self.inner = ttk.Frame(self.canvas)
         self.inner.bind("<Configure>", lambda e: self.canvas.configure(
             scrollregion=self.canvas.bbox("all")))
         self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
-        self.canvas.configure(yscrollcommand=sb.set)
-        self.canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        self.canvas.configure(yscrollcommand=sb.set, xscrollcommand=hsb.set)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        sb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        wrap.rowconfigure(0, weight=1)
+        wrap.columnconfigure(0, weight=1)
         self.get_root = lambda: ""
 
     def bind_root(self, getter):
@@ -122,8 +126,14 @@ class SystemListPanel:
                             lbl.configure(text=f"✓ complete ({g} games)",
                                           style="OK.TLabel")
                         else:
-                            parts = [f"{a} wheel(s)", f"{b} video(s)"]
-                            if r is not None:
+                            # only list what is actually missing - a
+                            # "0 rom(s)" entry reads like nothing was found
+                            parts = []
+                            if a:
+                                parts.append(f"{a} wheel(s)")
+                            if b:
+                                parts.append(f"{b} video(s)")
+                            if r:
                                 parts.append(f"{r} rom(s)")
                             lbl.configure(
                                 text="⚠ missing: " + ", ".join(parts)
@@ -290,30 +300,31 @@ class ClinicApp(tk.Tk):
 
         # --- HyperSpin folder ---
         ttk.Label(tab, text="HyperSpin folder", style="H.TLabel").pack(anchor="w", **pad)
+        ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
+            "Select your actual HyperSpin folder (the one containing the "
+            "Media and Databases folders). Saved automatically.")
+        ).pack(anchor="w", pady=(0, 4), **pad)
         row = ttk.Frame(tab)
         row.pack(fill="x", pady=(4, 2), **pad)
         self.var_root = tk.StringVar(value=self.cfg.get("hyperspin_root", ""))
-        ttk.Entry(row, textvariable=self.var_root).pack(
-            side="left", fill="x", expand=True, ipady=3)
+        ent_root = ttk.Entry(row, textvariable=self.var_root)
+        ent_root.pack(side="left", fill="x", expand=True, ipady=3)
+        ent_root.bind("<FocusOut>", lambda e: self._apply_root())
+        ent_root.bind("<Return>", lambda e: self._apply_root())
         ttk.Button(row, text="Browse…", command=self._browse).pack(side="left", padx=(8, 0))
 
         self.lbl_root_status = ttk.Label(tab, text="", style="Status.TLabel",
                                          wraplength=500, justify="left")
         self.lbl_root_status.pack(anchor="w", pady=(4, 0), **pad)
 
-        self.tree = ttk.Treeview(tab, columns=("themes", "snaps"),
+        self.tree = ttk.Treeview(tab, columns=("games",),
                                  show="headings", height=5)
-        self.tree.heading("themes", text="Themes")
-        self.tree.heading("snaps", text="Snaps")
-        self.tree.column("themes", width=90, anchor="e")
-        self.tree.column("snaps", width=90, anchor="e")
+        self.tree.heading("games", text="Games")
+        self.tree.column("games", width=90, anchor="e")
         self.tree["show"] = ("tree", "headings")
         self.tree.heading("#0", text="System")
-        self.tree.column("#0", width=180)
-        self.tree.pack(fill="x", pady=(8, 4), **pad)
-
-        ttk.Button(tab, text="Save folder", command=self._save_root).pack(
-            anchor="e", pady=(2, 6), **pad)
+        self.tree.column("#0", width=260)
+        self.tree.pack(fill="x", pady=(8, 6), **pad)
 
         # --- RocketLauncher folder (centralized rom locations) ---
         ttk.Label(tab, text="RocketLauncher folder", style="H.TLabel").pack(anchor="w", **pad)
@@ -332,23 +343,6 @@ class ClinicApp(tk.Tk):
                                        wraplength=500, justify="left")
         self.lbl_rl_status.pack(anchor="w", pady=(4, 6), **pad)
         self._refresh_rl_status()
-
-        # --- Theme Suite folder ---
-        ttk.Label(tab, text="Theme Suite folder", style="H.TLabel").pack(anchor="w", **pad)
-        tsrow = ttk.Frame(tab)
-        tsrow.pack(fill="x", pady=(2, 2), **pad)
-        self.var_ts = tk.StringVar(value=self.cfg.get("theme_suite_root", ""))
-        ent_ts = ttk.Entry(tsrow, textvariable=self.var_ts)
-        ent_ts.pack(side="left", fill="x", expand=True, ipady=3)
-        # a manually typed path must be validated + saved too, not only
-        # the Browse dialog result
-        ent_ts.bind("<FocusOut>", lambda e: self._refresh_ts_status())
-        ent_ts.bind("<Return>", lambda e: self._refresh_ts_status())
-        ttk.Button(tsrow, text="Browse…", command=self._browse_ts).pack(side="left", padx=(8, 0))
-        self.lbl_ts_status = ttk.Label(tab, text="", style="Status.TLabel",
-                                       wraplength=500, justify="left")
-        self.lbl_ts_status.pack(anchor="w", pady=(4, 10), **pad)
-        self._refresh_ts_status()
 
         ttk.Separator(tab).pack(fill="x", pady=6, **pad)
 
@@ -1174,33 +1168,6 @@ class ClinicApp(tk.Tk):
                      f"{info['systems']} system(s).",
                 foreground=OK)
 
-    def _browse_ts(self):
-        chosen = filedialog.askdirectory(
-            title="Select the HyperSpin Theme Suite folder (contains "
-                  "Convert-HyperSpin-Themes.ps1)")
-        if not chosen:
-            return
-        self.var_ts.set(chosen.replace("/", "\\"))
-        self._refresh_ts_status()
-
-    def _refresh_ts_status(self):
-        from clinic import themesuite
-        root = self.var_ts.get().strip()
-        if not root:
-            self.lbl_ts_status.configure(
-                text="Not set - the Themes tab is disabled.", foreground=SUBTLE)
-            return
-        if themesuite.looks_valid(root):
-            self.cfg["theme_suite_root"] = root
-            config.save(self.cfg)
-            self.lbl_ts_status.configure(
-                text="✓ Theme Suite found (converter + video recorder).",
-                foreground=OK)
-        else:
-            self.lbl_ts_status.configure(
-                text="✗ Convert-HyperSpin-Themes.ps1 / ThemeVideo not found here.",
-                foreground=BAD)
-
     # ---------- Themes tab (Theme Suite v3.7) ----------
     def _build_themes(self, tab):
         pad = {"padx": 16}
@@ -1273,9 +1240,12 @@ class ClinicApp(tk.Tk):
         if not selected:
             messagebox.showinfo("Themes", "Check at least one system.")
             return
+        # the suite ships with the app and is auto-located at startup
+        self.cfg["theme_suite_root"] = config.auto_theme_suite()
         if not themesuite.looks_valid(self.cfg.get("theme_suite_root", "")):
             messagebox.showwarning(
-                "Themes", "Set a valid Theme Suite folder in Setup first.")
+                "Themes", "The bundled theme_suite folder is missing next "
+                "to the application - reinstall the release package.")
             return
         steps = [k for k in ("convert", "record", "install")
                  if self.ts_ops[k].get()]
@@ -1347,10 +1317,26 @@ class ClinicApp(tk.Tk):
     # ---------- actions ----------
     def _browse(self):
         chosen = filedialog.askdirectory(
-            title="Select your HyperSpin folder (or its Media folder)")
+            title="Select your HyperSpin folder (contains Media + Databases)")
         if chosen:
             self.var_root.set(chosen.replace("/", "\\"))
-            self._refresh_root_status()
+            self._apply_root()
+
+    def _apply_root(self):
+        """Validate + save automatically - no Save button. A pick of the
+        Media folder itself is corrected to the HyperSpin root above it."""
+        root = self.var_root.get().strip()
+        if root and os.path.basename(root.rstrip("\\/")).lower() == "media":
+            parent = os.path.dirname(root.rstrip("\\/"))
+            if os.path.isdir(os.path.join(parent, "Databases")) or \
+                    os.path.isdir(os.path.join(parent, "Media")):
+                root = parent
+                self.var_root.set(root)
+        self._refresh_root_status()
+        if root and config.inspect_hyperspin(root)["valid"] and \
+                root != self.cfg.get("hyperspin_root", ""):
+            self.cfg["hyperspin_root"] = root
+            config.save(self.cfg)
 
     def _refresh_root_status(self, initial=False):
         root = self.var_root.get().strip()
@@ -1362,33 +1348,18 @@ class ClinicApp(tk.Tk):
         info = config.inspect_hyperspin(root)
         if not info["valid"]:
             self.lbl_root_status.configure(
-                text="✗ No HyperSpin Media systems found under this folder.",
+                text="✗ No HyperSpin systems found - select the HyperSpin "
+                     "folder that contains Media and Databases.",
                 foreground=BAD)
             return
         n_sys = len(info["systems"])
-        n_th = sum(s["themes"] for s in info["systems"])
-        n_sn = sum(s["snaps"] for s in info["systems"])
+        n_games = sum(s.get("games", 0) for s in info["systems"])
         self.lbl_root_status.configure(
-            text=f"✓ Found {n_sys} system(s), {n_th} theme zip(s), {n_sn} snap(s)."
-                 f"  Media: {info['media']}",
+            text=f"✓ Found {n_sys} system(s), {n_games} game(s). Saved.",
             foreground=OK)
         for s_info in info["systems"]:
             self.tree.insert("", "end", text=s_info["name"],
-                             values=(s_info["themes"], s_info["snaps"]))
-
-    def _save_root(self):
-        root = self.var_root.get().strip()
-        info = config.inspect_hyperspin(root)
-        if not info["valid"]:
-            messagebox.showwarning(
-                "HyperSpin folder",
-                "That folder does not look like a HyperSpin installation "
-                "(no Media\\<System>\\Themes found). It was NOT saved.")
-            return
-        self.cfg["hyperspin_root"] = root
-        config.save(self.cfg)
-        self._refresh_root_status()
-        messagebox.showinfo("HyperSpin folder", "Folder saved.")
+                             values=(s_info.get("games", 0),))
 
     def _add_key(self):
         key = self.var_key.get()

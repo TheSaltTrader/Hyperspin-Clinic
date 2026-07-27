@@ -28,12 +28,24 @@ def looks_valid(rl_root: str) -> bool:
 
 
 def _read_ini_key(path, key):
-    """All values of key (case-insensitive) in an ini file, tolerant."""
+    """All values of key (case-insensitive) in an ini file, tolerant.
+    RocketLauncher's UI saves some inis as UTF-16; a UTF-8 read turns
+    those into NUL-riddled text that matches nothing - detect by BOM and
+    embedded NULs and decode accordingly."""
     try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            text = f.read()
+        with open(path, "rb") as f:
+            raw = f.read()
     except OSError:
         return []
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        text = raw.decode("utf-16", errors="replace")
+    elif b"\x00" in raw[:200]:
+        text = raw.decode("utf-16-le", errors="replace")
+    else:
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252", errors="replace")
     return [m.group(1).strip() for m in
             re.finditer(r"(?im)^\s*" + re.escape(key) + r"\s*=\s*(.+?)\s*$",
                         text)]

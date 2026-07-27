@@ -23,6 +23,26 @@ DEFAULTS = {
 }
 
 
+def auto_theme_suite() -> str:
+    """The Theme Suite ships WITH the application - locate it automatically
+    (no Setup field). Search order:
+      1. theme_suite\\ next to the exe (packaged folder build)
+      2. theme_suite\\ in the source tree (running from source)
+      3. the development suite location (this machine only)
+    Returns "" when none exists; the Themes tab reports that state."""
+    import sys
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.join(os.path.dirname(sys.executable),
+                                       "theme_suite"))
+    candidates.append(os.path.join(ROOT, "theme_suite"))
+    candidates.append(DEFAULTS["theme_suite_root"])
+    for c in candidates:
+        if os.path.isfile(os.path.join(c, "Convert-HyperSpin-Themes.ps1")):
+            return c
+    return ""
+
+
 def load() -> dict:
     cfg = dict(DEFAULTS)
     try:
@@ -33,6 +53,9 @@ def load() -> dict:
     except Exception:
         pass  # corrupt settings: fall back to defaults, don't crash the UI
     cfg.pop("anthropic_api_key", None)   # legacy plaintext keys are never kept
+    # the suite location is resolved fresh on every load - it travels with
+    # the app, the user never configures it
+    cfg["theme_suite_root"] = auto_theme_suite()
     return cfg
 
 
@@ -50,10 +73,23 @@ def chroma_dir() -> str:
     return p
 
 
+def games_count(root: str, system: str) -> int:
+    """Number of <game> entries in a system's database XML (0 if absent)."""
+    import re as _re
+    p = os.path.join(root, "Databases", system, system + ".xml")
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            return len(_re.findall(r'<game\s+name\s*=', f.read()))
+    except OSError:
+        return 0
+
+
 def inspect_hyperspin(root: str) -> dict:
-    """Identify what lives under a HyperSpin folder. Accepts either the
-    HyperSpin root (containing Media\\) or the Media folder itself.
-    Returns a summary dict: {valid, media, systems: [{name, themes, snaps}]}"""
+    """Identify what lives under a HyperSpin folder. The expected pick is
+    the ACTUAL HyperSpin root (Media\\ and Databases\\ underneath); the
+    Media folder itself is tolerated for robustness.
+    Returns a summary dict: {valid, media, systems: [{name, themes, snaps,
+    games}]}"""
     out = {"valid": False, "media": "", "systems": []}
     if not root or not os.path.isdir(root):
         return out
@@ -90,7 +126,11 @@ def inspect_hyperspin(root: str) -> dict:
                             if f.name.lower().endswith((".mp4", ".flv", ".avi")))
             except OSError:
                 pass
-        out["systems"].append({"name": e.name, "themes": themes, "snaps": snaps})
+        game_root = os.path.dirname(media) if os.path.basename(
+            media).lower() == "media" else media
+        out["systems"].append({"name": e.name, "themes": themes,
+                               "snaps": snaps,
+                               "games": games_count(game_root, e.name)})
     out["valid"] = bool(out["systems"])
     out["media"] = media
     return out

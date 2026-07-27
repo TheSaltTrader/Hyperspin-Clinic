@@ -1,9 +1,12 @@
 # HyperSpin Clinic
 
-**v1.1.0** — adds the Ask AI (RAG chat) tab, Theme Suite live progress,
-and a full security audit round (path-traversal guard on system names,
-zip decompression caps, orphan-process cleanup on close, thread-safe
-cost tracking, corrected model pricing).
+**v1.2.0** — Setup streamlined: HyperSpin folder saves automatically
+(no Save button), the system table shows game counts, the Theme Suite
+ships with the app and is auto-located (no Setup field), system lists
+gained a horizontal scrollbar, RocketLauncher inis are read
+encoding-tolerantly (UTF-16), and zero-counts no longer clutter the
+analysis line. (v1.1.0: Ask AI RAG chat tab, Theme Suite live progress,
+security audit round.)
 
 A desktop companion for maintaining a HyperSpin arcade setup: a vertical,
 white-themed window with tabs along the top. Under the hood: hybrid search
@@ -49,10 +52,12 @@ are created inside a `data\` folder next to the exe.
 
 ### Setup (implemented)
 The tab's sole goal is configuring the application:
-- **HyperSpin folder** — Browse to the HyperSpin root (or its `Media`
-  folder). The app identifies every system underneath (`Media\<System>\
-  Themes` + `Video`) and shows a per-system summary (theme/snap counts)
-  before you save.
+- **HyperSpin folder** — select your *actual* HyperSpin folder (the one
+  containing `Media` and `Databases`; all system art lives under
+  `Media\<System>\`). The pick is validated and **saved automatically** —
+  there is no Save button — and the table lists each detected system
+  with its **game count**. Picking `Media` by mistake is auto-corrected
+  to its parent.
 - **Claude API key** — a masked field + *Add key* button. Security model
   (OWASP secrets-management practice):
   - the key is stored **encrypted in the Windows Credential Manager**
@@ -64,10 +69,10 @@ The tab's sole goal is configuring the application:
     user-triggered minimal API call to verify it;
   - *Remove* deletes it from the credential store.
 
-- **Theme Suite folder** — where the HyperSpin Theme Suite v3.7 lives
-  (the folder containing `Convert-HyperSpin-Themes.ps1` and
-  `ThemeVideo\`). Powers the **Themes** tab; the suite runs in place —
-  nothing is ever copied into your HyperSpin installation.
+- **Theme Suite** — nothing to configure: the suite **ships with the
+  application** (`theme_suite` folder next to the exe) and is located
+  automatically at startup. It powers the **Themes** tab and runs in
+  place — nothing is ever copied into your HyperSpin installation.
 - **AI model & costs** — pick which Claude model does the work from a
   list (pulled live from the API once a key is stored). The **default is
   deliberately the cheapest current model** (Haiku), never the most

@@ -24,3 +24,7 @@ token.txt
 # Local test screenshots / cab photos dropped in the project root
 /*.jpg
 /*.png
+
+# Bundled Theme Suite (large binaries: deno/ffmpeg/ruffle) - ships in the
+# release zip, not in the repo
+theme_suite/
