@@ -600,6 +600,11 @@ class ClinicApp(tk.Tk):
         self.var_fill_empty = tk.BooleanVar(value=True)
         ttk.Checkbutton(opts, text="Only fill missing fields (never overwrite existing values)",
                         variable=self.var_fill_empty).pack(anchor="w")
+        self.var_web_search = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opts, text=("Web-search games the AI can't identify "
+                                    "(recent titles — ≈$0.01 per search, "
+                                    "cost shown in the log)"),
+                        variable=self.var_web_search).pack(anchor="w")
 
         run = ttk.Frame(tab)
         run.pack(fill="x", pady=(6, 4), **pad)
@@ -671,6 +676,7 @@ class ClinicApp(tk.Tk):
         self.btn_stop.configure(state="normal")
         total = len(selected)
         fill_empty = self.var_fill_empty.get()   # read on the UI thread
+        web_search = self.var_web_search.get()
         self.pb.configure(maximum=total * 100, value=0)
 
         def status(idx, frac, msg):
@@ -692,6 +698,7 @@ class ClinicApp(tk.Tk):
                             self.cfg, s_name, self._log,
                             stop_flag=lambda: self._stop,
                             only_fill_empty=fill_empty,
+                            web_search=web_search,
                             progress=lambda f, m, i=idx: status(i, f, m))
                     except enrich.StopRequested:
                         self._log("— stopped by user —")
