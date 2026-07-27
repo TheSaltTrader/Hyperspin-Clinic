@@ -67,6 +67,29 @@ def reset(cfg):
     return collection(cfg)
 
 
+def track(cfg, chunks, log=None):
+    """Best-effort indexing for TRACKING records (art additions, renames,
+    reverts). The file operation being tracked already succeeded - a
+    broken embedder (missing onnxruntime, no model) must never fail it.
+    Returns True when the vector index was updated."""
+    from . import es as es_mod
+    ok = True
+    try:
+        add_chunks(collection(cfg), chunks)
+    except Exception as e:
+        ok = False
+        if log:
+            log(f"  note: search indexing unavailable ({e}) - the "
+                f"operation itself completed; continuing")
+    try:
+        if es_mod.available(cfg):
+            es_mod.ensure_index(cfg)
+            es_mod.add_chunks(cfg, chunks)
+    except Exception:
+        pass
+    return ok
+
+
 def add_chunks(col, chunks, batch=128):
     for i in range(0, len(chunks), batch):
         part = chunks[i:i + batch]

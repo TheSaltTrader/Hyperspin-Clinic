@@ -115,11 +115,8 @@ def _track_reverts(cfg, lines, log):
         text=f"Reverted {when}: {l}",
         source="revert", kind="revert", meta={"when": when},
     ) for l in lines]
-    store.add_chunks(store.collection(cfg), chunks)
-    if es_mod.available(cfg):
-        es_mod.ensure_index(cfg)
-        es_mod.add_chunks(cfg, chunks)
-    log(f"  tracked {len(lines)} revert(s) in the database")
+    if store.track(cfg, chunks, log):
+        log(f"  tracked {len(lines)} revert(s) in the database")
 
 
 def revert(cfg, systems, categories, log=print):

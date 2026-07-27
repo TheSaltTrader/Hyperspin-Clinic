@@ -165,6 +165,20 @@ OK = "#1a7f37"
 BAD = "#c62828"
 
 
+def scrolled_log(parent, pack_kw, **text_kw):
+    """A console/log Text with a vertical scrollbar (every tab's log)."""
+    frame = ttk.Frame(parent)
+    frame.pack(**pack_kw)
+    txt = tk.Text(frame, bg="#fafafa", fg=FG, relief="flat",
+                  state="disabled", highlightthickness=1,
+                  highlightbackground="#dddddd", **text_kw)
+    sb = ttk.Scrollbar(frame, orient="vertical", command=txt.yview)
+    txt.configure(yscrollcommand=sb.set)
+    txt.pack(side="left", fill="both", expand=True)
+    sb.pack(side="right", fill="y")
+    return txt
+
+
 class ClinicApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -507,10 +521,9 @@ class ClinicApp(tk.Tk):
                                         wraplength=500, justify="left")
         self.lbl_sys_status.pack(anchor="w", padx=16)
 
-        self.txt_log = tk.Text(tab, height=10, bg="#fafafa", fg=FG, relief="flat",
-                               font=("Consolas", 9), state="disabled", wrap="word",
-                               highlightthickness=1, highlightbackground="#dddddd")
-        self.txt_log.pack(fill="both", expand=True, pady=(4, 12), **pad)
+        self.txt_log = scrolled_log(
+            tab, {"fill": "both", "expand": True, "pady": (4, 12), **pad},
+            height=10, font=("Consolas", 9), wrap="word")
 
         self._worker = None
         self._stop = False
@@ -657,10 +670,9 @@ class ClinicApp(tk.Tk):
                                         wraplength=500, justify="left")
         self.lbl_art_status.pack(anchor="w", padx=16)
 
-        self.txt_art_log = tk.Text(tab, height=10, bg="#fafafa", fg=FG, relief="flat",
-                                   font=("Consolas", 9), state="disabled", wrap="word",
-                                   highlightthickness=1, highlightbackground="#dddddd")
-        self.txt_art_log.pack(fill="both", expand=True, pady=(4, 12), **pad)
+        self.txt_art_log = scrolled_log(
+            tab, {"fill": "both", "expand": True, "pady": (4, 12), **pad},
+            height=10, font=("Consolas", 9), wrap="word")
         self._art_stop = False
 
     def _art_log(self, msg):
@@ -772,10 +784,9 @@ class ClinicApp(tk.Tk):
 
         ttk.Label(tab, text="Changes (this run + history)", style="Sub.TLabel").pack(
             anchor="w", pady=(6, 0), **pad)
-        self.txt_rn_log = tk.Text(tab, height=7, bg="#fafafa", fg=FG, relief="flat",
-                                  font=("Consolas", 9), state="disabled", wrap="none",
-                                  highlightthickness=1, highlightbackground="#dddddd")
-        self.txt_rn_log.pack(fill="both", expand=True, pady=(2, 12), **pad)
+        self.txt_rn_log = scrolled_log(
+            tab, {"fill": "both", "expand": True, "pady": (2, 12), **pad},
+            height=7, font=("Consolas", 9), wrap="none")
         self._rn_log_fill_history()
 
     def _rn_logline(self, msg):
@@ -1074,10 +1085,9 @@ class ClinicApp(tk.Tk):
         self.lbl_rv_status = ttk.Label(run, text="", style="Sub.TLabel")
         self.lbl_rv_status.pack(side="right")
 
-        self.txt_rv_log = tk.Text(tab, height=8, bg="#fafafa", fg=FG, relief="flat",
-                                  font=("Consolas", 9), state="disabled", wrap="word",
-                                  highlightthickness=1, highlightbackground="#dddddd")
-        self.txt_rv_log.pack(fill="both", expand=True, pady=(6, 12), **pad)
+        self.txt_rv_log = scrolled_log(
+            tab, {"fill": "both", "expand": True, "pady": (6, 12), **pad},
+            height=8, font=("Consolas", 9), wrap="word")
 
     def _rv_logline(self, msg):
         self.txt_rv_log.configure(state="normal")
@@ -1240,10 +1250,9 @@ class ClinicApp(tk.Tk):
         self.lbl_ts_file = ttk.Label(filerow, text="", style="Sub.TLabel")
         self.lbl_ts_file.pack(side="left", padx=(8, 0))
 
-        self.txt_ts_log = tk.Text(tab, height=11, bg="#fafafa", fg=FG, relief="flat",
-                                  font=("Consolas", 9), state="disabled", wrap="none",
-                                  highlightthickness=1, highlightbackground="#dddddd")
-        self.txt_ts_log.pack(fill="both", expand=True, pady=(6, 12), **pad)
+        self.txt_ts_log = scrolled_log(
+            tab, {"fill": "both", "expand": True, "pady": (6, 12), **pad},
+            height=11, font=("Consolas", 9), wrap="none")
         self._ts_stop = False
 
     def _ts_log(self, msg):

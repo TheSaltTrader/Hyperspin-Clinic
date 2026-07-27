@@ -153,11 +153,8 @@ def _track(cfg, entries, log):
         meta={"system": e["system"], "game": e["game"], "art": e["art"],
               "source": e["source"], "added": stamp},
     ) for e in entries]
-    store.add_chunks(store.collection(cfg), chunks)
-    if es_mod.available(cfg):
-        es_mod.ensure_index(cfg)
-        es_mod.add_chunks(cfg, chunks)
-    log(f"  tracked {len(entries)} addition(s) in the database")
+    if store.track(cfg, chunks, log):
+        log(f"  tracked {len(entries)} addition(s) in the database")
 
 
 # ---------- youtube fallback (videos only) ----------
@@ -172,10 +169,13 @@ def youtube_video(desc, dst_path, log):
     q = f"ytsearch1:{desc} arcade gameplay"
     tmp = dst_path + ".yt.mp4"
     try:
+        # CREATE_NO_WINDOW: yt-dlp (and the ffmpeg it spawns) must never
+        # flash a console at the user - activity shows in the log pane
         r = subprocess.run(
             [yt, q, "-f", "mp4[height<=480]/best[height<=480]", "-o", tmp,
              "--no-playlist", "--quiet", "--no-warnings"],
-            capture_output=True, timeout=300)
+            capture_output=True, timeout=300,
+            creationflags=0x08000000)
         if r.returncode == 0 and os.path.isfile(tmp):
             os.replace(tmp, dst_path)
             return True

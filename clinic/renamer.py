@@ -193,12 +193,10 @@ def apply(cfg, system, target, roms_dir, decisions, log=print):
                   "target": e["target"], "old": e["old"], "new": e["new"],
                   "when": when},
         ) for e in entries]
-        store.add_chunks(store.collection(cfg), chunks)
-        if es_mod.available(cfg):
-            es_mod.ensure_index(cfg)
-            es_mod.add_chunks(cfg, chunks)
+        tracked = store.track(cfg, chunks, log)
         log(f"  backup: {backup}")
-        log(f"  tracked {len(entries)} rename(s) in the database")
+        if tracked:
+            log(f"  tracked {len(entries)} rename(s) in the database")
     return renamed
 
 
