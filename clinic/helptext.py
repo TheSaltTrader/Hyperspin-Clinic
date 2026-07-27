@@ -26,6 +26,24 @@ HELP = """HYPERSPIN CLINIC — HOW EVERYTHING WORKS
 • EmuMovies account: username + password for files.emumovies.com (plain
   FTP per the knowledge base). Stored encrypted the same way. Used by
   the Missing Art tab.
+• YouTube sign-in: YouTube periodically BLOCKS anonymous downloads for
+  a while (HTTP 403 / "sign in to confirm you're not a bot") - instead
+  of waiting the block out, give yt-dlp your YouTube sign-in cookies:
+   - Browser: log in to youtube.com in that browser, then pick it here.
+     yt-dlp reads the cookies straight from the browser's profile.
+     FIREFOX IS THE MOST RELIABLE on Windows - Chrome/Edge encrypt
+     their cookie store and may need the browser fully closed (all
+     background processes) before yt-dlp can read it.
+   - cookies.txt: export your youtube.com cookies with a browser
+     extension such as "Get cookies.txt LOCALLY" (Netscape format) and
+     select the file. When both are set, the FILE wins. The export must
+     be made WHILE SIGNED IN to YouTube: a file without youtube.com
+     cookies is ignored (it would make every download fail).
+  The cookies are only ever read locally by yt-dlp on your machine;
+  this app stores just the browser choice / file path in settings.json,
+  never the cookies themselves. Treat an exported cookies.txt like a
+  password: anyone with that file can act as your YouTube account.
+  Clear resets both fields - downloads then run anonymously again.
 • Theme Suite: nothing to configure - the suite SHIPS WITH the app
   (theme_suite folder next to the exe) and is located automatically at
   startup. It powers the Themes tab and runs in place, never copied
@@ -69,7 +87,11 @@ pre-selected). Sources are tried in the knowledge base's order:
     swapped here.
  2. EMUMOVIES — video snaps (HQ → SQ → HD folders) and the system's
     Logos pack for wheels (downloaded once, cached).
- 3. YOUTUBE — videos only, via yt-dlp when installed.
+ 3. YOUTUBE — videos only, via yt-dlp when installed. Snap-length
+    videos (under 7 minutes) are preferred over long-plays, with
+    retries across the top search results. If downloads fail with
+    HTTP 403 / "sign in to confirm", configure YouTube sign-in on
+    the Setup tab.
 The red analysis line under each system shows missing wheels and
 videos - so you can see at a glance which system needs the most work.
 Every downloaded wheel is curated: transparent border trimmed,

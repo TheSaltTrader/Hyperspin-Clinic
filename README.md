@@ -87,6 +87,25 @@ The tab's sole goal is configuring the application:
   `Rom_Extension` and multiple `|`-separated paths). This centralizes rom
   locations: the Rename tab's rom mode uses these paths directly (its
   own rom browser was removed). Missing roms are not listed on any tab.
+- **YouTube sign-in** — YouTube periodically blocks anonymous downloads
+  for a while (HTTP 403 / *"sign in to confirm you're not a bot"*),
+  which stalls the Missing Art tab's video fallback until the block
+  expires. Instead of waiting, let `yt-dlp` use your YouTube sign-in:
+  1. Log in to youtube.com in your browser, then pick that browser in
+     the *YouTube sign-in* section — `yt-dlp` reads its cookies directly.
+     **Firefox is the most reliable on Windows**; Chrome/Edge encrypt
+     their cookie store and may need the browser fully closed before
+     the cookies can be read.
+  2. Or export your youtube.com cookies to a `cookies.txt` file
+     (Netscape format — e.g. the *"Get cookies.txt LOCALLY"* browser
+     extension) and select the file. When both are set, the file wins.
+     Export **while signed in** to YouTube — a file without youtube.com
+     cookies is ignored (verified live: it makes every download 403).
+
+  Only the browser choice / file path is stored (in `settings.json`) —
+  never the cookies themselves; they are read locally by `yt-dlp` at
+  download time. Treat an exported `cookies.txt` like a password. The
+  *Clear* button resets both fields (anonymous downloads again).
 
 `settings.json` holds only non-secret configuration (folder path, engine
 URLs, model choice).
@@ -134,6 +153,11 @@ through the sources in the knowledge base's order:
    wheels (pack downloaded once, cached). Credentials are entered in
    Setup and stored encrypted in the Credential Manager.
 3. **YouTube** (videos only) — `yt-dlp` search fallback when installed.
+   Snap-length videos (< 7 minutes) are preferred over long-plays: the
+   top 5 search results are tried with a duration filter (skipping past
+   transient HTTP 403s), then the old any-length top result as a last
+   resort. If YouTube blocks downloads with *"sign in to confirm"*,
+   configure **YouTube sign-in** on the Setup tab (see above).
 
 **Wheel curation** (every downloaded wheel): transparent border trimmed,
 horizontal **×0.75 squeeze** (so it displays correctly on the 16:9
