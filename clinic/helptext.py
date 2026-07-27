@@ -137,11 +137,13 @@ Three steps, run per checked system in order:
  • Convert 16:9 — converts the system's 4:3 themes to 16:9
    (widescreen). Originals are backed up to Media\\<System>\\
    Themes_backup first. Themes whose video frame is baked into a
-   full-canvas Flash artwork (the converter cannot resize SWF) are
-   kept VERBATIM so frame and video stay registered on the 16:9
-   stretch — squeezing the video would tear it out of its flash
-   bezel (the dmnfrnt case). XML-drawn borders (bsize/bcolor) always
-   follow the video automatically and never need this. Converted themes are stamped in their
+   full-canvas Flash artwork (the converter cannot resize compiled
+   SWF) convert normally, and the RECORDER re-registers the flash
+   bezel: the flash layer is squeezed x0.75 about the video center
+   at render time, so the recorded theme shows the game at true 4:3
+   with the bezel hugging it and no flash art stretched (the dmnfrnt
+   case). XML-drawn borders (bsize/bcolor) always follow the video
+   automatically and never need this. Converted themes are stamped in their
    Info.txt ("Converted to 16:9 by HyperSpin Theme Suite", the
    mrfomt convention) and BYPASSED on future runs - re-running
    only processes themes not yet marked 16:9.
