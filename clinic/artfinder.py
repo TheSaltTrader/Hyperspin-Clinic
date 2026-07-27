@@ -198,7 +198,7 @@ def missing_counts(cfg, system):
     try:
         games = hdb.parse_games(hdb.read_db_text(xml)[0])
     except OSError:
-        return (0, 0, 0)
+        return (0, 0, 0, None)
     paths = media_paths(cfg, system)
     out = []
     for folder, exts in ((paths["wheel"], (".png", ".jpg")),

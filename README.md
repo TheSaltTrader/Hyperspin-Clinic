@@ -1,5 +1,10 @@
 # HyperSpin Clinic
 
+**v1.1.0** — adds the Ask AI (RAG chat) tab, Theme Suite live progress,
+and a full security audit round (path-traversal guard on system names,
+zip decompression caps, orphan-process cleanup on close, thread-safe
+cost tracking, corrected model pricing).
+
 A desktop companion for maintaining a HyperSpin arcade setup: a vertical,
 white-themed window with tabs along the top. Under the hood: hybrid search
 (Elasticsearch + ChromaDB vector store), RAG, and optional Claude AI via a

@@ -101,7 +101,10 @@ class SystemListPanel:
                             pass
                     lbl = self._stat_labels.get(s_name)
                     if lbl:
-                        lbl.after(0, update_custom)
+                        try:
+                            lbl.after(0, update_custom)
+                        except tk.TclError:
+                            return   # widget destroyed by a Reload
                     continue
                 try:
                     games, mw, mv, mr = artfinder.missing_counts(cfg, s_name)
@@ -130,7 +133,10 @@ class SystemListPanel:
                         pass
                 lbl = self._stat_labels.get(s_name)
                 if lbl:
-                    lbl.after(0, update)
+                    try:
+                        lbl.after(0, update)
+                    except tk.TclError:
+                        return   # widget destroyed by a Reload - stale run
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -153,7 +159,7 @@ class ClinicApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("HyperSpin Clinic")
-        self.geometry("560x1000")         # vertical rectangle, all 7 tabs visible
+        self.geometry("560x1000")         # vertical rectangle, all 8 tabs visible
         self.minsize(540, 780)
         self.configure(bg=BG)
         self.cfg = config.load()
@@ -165,6 +171,15 @@ class ClinicApp(tk.Tk):
         # signal workers so no rename/enrichment batch is killed mid-write
         self._stop = True
         self._art_stop = True
+        self._ts_stop = True
+        # suite children (powershell/deno/chrome/ffmpeg) must not survive
+        # the window as orphans - kill the tracked trees directly, the
+        # worker's own stop check may never run again after destroy
+        try:
+            from clinic import themesuite
+            themesuite.kill_active()
+        except Exception:
+            pass
         self.after(150, self.destroy)
 
     # ---------- theming ----------
@@ -323,8 +338,12 @@ class ClinicApp(tk.Tk):
         tsrow = ttk.Frame(tab)
         tsrow.pack(fill="x", pady=(2, 2), **pad)
         self.var_ts = tk.StringVar(value=self.cfg.get("theme_suite_root", ""))
-        ttk.Entry(tsrow, textvariable=self.var_ts).pack(
-            side="left", fill="x", expand=True, ipady=3)
+        ent_ts = ttk.Entry(tsrow, textvariable=self.var_ts)
+        ent_ts.pack(side="left", fill="x", expand=True, ipady=3)
+        # a manually typed path must be validated + saved too, not only
+        # the Browse dialog result
+        ent_ts.bind("<FocusOut>", lambda e: self._refresh_ts_status())
+        ent_ts.bind("<Return>", lambda e: self._refresh_ts_status())
         ttk.Button(tsrow, text="Browse…", command=self._browse_ts).pack(side="left", padx=(8, 0))
         self.lbl_ts_status = ttk.Label(tab, text="", style="Status.TLabel",
                                        wraplength=500, justify="left")
@@ -501,8 +520,12 @@ class ClinicApp(tk.Tk):
             self.sys_list.reload()
         elif idx == 2 and not self.art_list.vars:
             self.art_list.reload()
+        elif idx == 3 and not self.rename_list.vars:
+            self.rename_list.reload()
         elif idx == 4 and not self.themes_list.vars:
             self.themes_list.reload()
+        elif idx == 6:
+            self._rv_refresh()
 
     def _load_systems(self):
         self.sys_list.reload()
@@ -1267,6 +1290,7 @@ class ClinicApp(tk.Tk):
         self._ts_stop = False
         self.btn_ts_start.configure(state="disabled")
         self.btn_ts_stop.configure(state="normal")
+        cfg = dict(self.cfg)   # snapshot: Setup edits must not redirect a run
         n_total = len(selected) * len(steps)
         self.pb_ts.configure(maximum=n_total, value=0)
         runners = {"convert": themesuite.convert_system,
@@ -1306,7 +1330,7 @@ class ClinicApp(tk.Tk):
                         status(done, f"{s_name}: {step}")
                         reset_file_bar()
                         try:
-                            runners[step](self.cfg, s_name, self._ts_log,
+                            runners[step](cfg, s_name, self._ts_log,
                                           lambda: self._ts_stop,
                                           progress=file_progress)
                         except Exception as e:
@@ -1428,14 +1452,18 @@ class ClinicApp(tk.Tk):
             return
 
         def run():
-            models = costs.list_models(key)
+            models, live = costs.list_models(key)
             def apply():
                 self.cmb_model.configure(values=models)
-                if self.var_model.get() not in models and models:
-                    pass  # keep the saved choice even if not listed
-                self.lbl_model_cost.configure(
-                    text=f"{len(models)} model(s) loaded from the API.",
-                    foreground=SUBTLE)
+                if live:
+                    self.lbl_model_cost.configure(
+                        text=f"{len(models)} model(s) loaded from the API.",
+                        foreground=SUBTLE)
+                else:
+                    self.lbl_model_cost.configure(
+                        text="Could not reach the API - showing the "
+                             "built-in list. Check the key / connection.",
+                        foreground=BAD)
             self.after(0, apply)
 
         threading.Thread(target=run, daemon=True).start()

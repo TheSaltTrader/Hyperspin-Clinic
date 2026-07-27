@@ -6,8 +6,10 @@
 # mid-2026); unknown models show "n/a" rather than a wrong number.
 import json
 import os
+import threading
 
 _ATOMIC_SUFFIX = ".tmp"
+_SPEND_LOCK = threading.Lock()
 
 # longest-prefix match against the model id
 PRICES = {
@@ -18,8 +20,10 @@ PRICES = {
     "claude-sonnet-4": (3.00, 15.00),
     "claude-3-7-sonnet": (3.00, 15.00),
     "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
     "claude-opus-4-5": (5.00, 25.00),
-    "claude-opus-4": (15.00, 75.00),
+    "claude-opus-4": (15.00, 75.00),   # opus 4.0/4.1 legacy pricing
 }
 
 BILLING_URL = "https://console.anthropic.com/settings/billing"
@@ -53,7 +57,11 @@ def estimate(model, input_tokens, output_tokens):
 
 
 def _spend_path():
-    return os.path.join("data", "api_spend.json")
+    # absolute, next to the rest of the app's data - never CWD-relative
+    # (a shortcut with a different working dir would silently fork the
+    # spend history)
+    from .config import DATA_DIR
+    return os.path.join(DATA_DIR, "api_spend.json")
 
 
 def load_spend():
@@ -68,25 +76,32 @@ def load_spend():
 
 
 def record_spend(cost_usd):
-    """Add one call's cost to the persistent running total."""
-    d = load_spend()
-    d["calls"] += 1
-    if cost_usd:
-        d["total_usd"] += cost_usd
-    os.makedirs("data", exist_ok=True)
-    tmp = _spend_path() + _ATOMIC_SUFFIX
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-    os.replace(tmp, _spend_path())
-    return d
+    """Add one call's cost to the persistent running total (thread-safe:
+    enrichment and Ask AI can bill concurrently)."""
+    with _SPEND_LOCK:
+        d = load_spend()
+        d["calls"] += 1
+        if cost_usd:
+            d["total_usd"] += cost_usd
+        path = _spend_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + _ATOMIC_SUFFIX
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, path)
+        return d
 
 
 def list_models(api_key):
-    """Model ids from the API (newest first), FALLBACK_MODELS on failure."""
+    """(model_ids, live) - live=False means the API could not be reached
+    and the ids are the built-in fallback list, so callers can say so
+    instead of claiming a successful refresh."""
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         ids = [m.id for m in client.models.list(limit=50)]
-        return ids or list(FALLBACK_MODELS)
+        if ids:
+            return ids, True
     except Exception:
-        return list(FALLBACK_MODELS)
+        pass
+    return list(FALLBACK_MODELS), False

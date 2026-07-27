@@ -40,31 +40,75 @@ def system_dir(cfg, system):
     return os.path.join(media_dir(cfg["hyperspin_root"]), system)
 
 
+# pids of suite children currently running, so the app can kill the whole
+# tree on window close even when the worker thread is blocked
+_ACTIVE_PIDS = set()
+
+
+def _kill_tree(pid):
+    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                   capture_output=True, creationflags=CREATE_NO_WINDOW)
+
+
+def kill_active():
+    """Kill every running suite process tree (called on window close)."""
+    for pid in list(_ACTIVE_PIDS):
+        _kill_tree(pid)
+        _ACTIVE_PIDS.discard(pid)
+
+
 def _stream(cmd, log, stop_flag, cwd=None, env=None, on_line=None):
     """Run a subprocess, stream stdout lines into log; on stop request the
     whole process tree is killed (taskkill /T - the recorder spawns
     chrome/ffmpeg children). on_line(raw) sees every line first and may
-    return True to swallow it from the log (progress markers)."""
+    return True to swallow it from the log (progress markers).
+    Output is read on a helper thread so Stop stays responsive even when
+    the child goes silent (a hung chrome produces no lines)."""
+    import queue as _queue
+    import threading as _threading
     proc = subprocess.Popen(
         cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, text=True, encoding="utf-8",
         errors="replace", creationflags=CREATE_NO_WINDOW)
+    _ACTIVE_PIDS.add(proc.pid)
+    q = _queue.Queue()
+
+    def reader():
+        try:
+            for raw in proc.stdout:
+                q.put(raw)
+        except Exception:
+            pass
+        finally:
+            q.put(None)
+
+    _threading.Thread(target=reader, daemon=True).start()
+    killed = False
     try:
-        for line in proc.stdout:
-            line = line.rstrip()
+        while True:
+            if stop_flag() and not killed:
+                log("    stopping - killing process tree…")
+                _kill_tree(proc.pid)
+                killed = True
+            try:
+                raw = q.get(timeout=0.5)
+            except _queue.Empty:
+                continue
+            if raw is None:
+                break
+            line = raw.rstrip()
             if line and on_line and on_line(line):
                 line = ""
             if line:
                 log("    " + line[-160:])
-            if stop_flag():
-                log("    stopping - killing process tree…")
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                               capture_output=True,
-                               creationflags=CREATE_NO_WINDOW)
-                return -1
     finally:
-        proc.stdout.close()
-    return proc.wait()
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+        code = proc.wait()
+        _ACTIVE_PIDS.discard(proc.pid)
+    return -1 if killed else code
 
 
 _PROG_RE = re.compile(r"^PROG (\d+)/(\d+) (.+)$")
@@ -167,23 +211,27 @@ def theme_stats(cfg, system):
         n["total"] += 1
         try:
             with zipfile.ZipFile(os.path.join(tdir, fname)) as z:
-                names = [i.filename for i in z.infolist()
+                infos = [i for i in z.infolist()
                          if not i.filename.endswith("/")]
+                names = [i.filename for i in infos]
+                sizes = {i.filename: i.file_size for i in infos}
                 base_names = [os.path.basename(m) for m in names]
                 low = [b.lower() for b in base_names]
                 if any(b == "info.txt" for b in low):
-                    m = base_names[low.index("info.txt")]
-                    idx = [os.path.basename(x) for x in names].index(m)
-                    txt = z.read(names[idx]).decode("utf-8", "replace")
-                    if "Rendered theme video" in txt:
-                        n["installed"] += 1
-                        continue
-                    # mrfomt-convention marker: theme already 16:9 (the
-                    # converter stamps its outputs the same way and
-                    # bypasses marked themes on future runs)
-                    if re.search(r"16\s*[:x]\s*9", txt):
-                        n["c169"] += 1
-                        continue
+                    member = names[low.index("info.txt")]
+                    # cap: a crafted zip must not expand into RAM
+                    # (deflate reaches ~1000:1) - Info.txt is tiny
+                    if sizes.get(member, 0) <= 1_000_000:
+                        txt = z.read(member).decode("utf-8", "replace")
+                        if "Rendered theme video" in txt:
+                            n["installed"] += 1
+                            continue
+                        # mrfomt-convention marker: theme already 16:9
+                        # (the converter stamps its outputs the same way
+                        # and bypasses marked themes on future runs)
+                        if re.search(r"(?<!\d)16\s*[:x]\s*9(?!\d)", txt):
+                            n["c169"] += 1
+                            continue
                 art = [b for b in low
                        if not b.startswith(".")
                        and not b.endswith((".txt", ".xml", ".ini", ".db"))]
@@ -192,23 +240,28 @@ def theme_stats(cfg, system):
                     continue
                 if len(art) == 1 and art[0].startswith("background") \
                         and art[0].endswith(".png"):
-                    try:
-                        from PIL import Image
-                        idx = low.index(art[0])
-                        im = Image.open(io.BytesIO(z.read(names[idx])))
-                        if "A" in im.getbands() and \
-                                im.getchannel("A").getextrema()[1] == 0:
-                            n["video"] += 1
-                            continue
-                    except Exception:
-                        pass
+                    member = names[low.index(art[0])]
+                    if sizes.get(member, 0) <= 40_000_000:
+                        try:
+                            from PIL import Image
+                            im = Image.open(io.BytesIO(z.read(member)))
+                            if "A" in im.getbands() and \
+                                    im.getchannel("A").getextrema()[1] == 0:
+                                n["video"] += 1
+                                continue
+                        except Exception:
+                            pass
                 raster = [b for b in art if b.endswith(
                     (".png", ".jpg", ".jpeg", ".gif", ".bmp"))]
                 swf = [b for b in art if b.endswith(".swf")]
-                if not raster and swf:
+                if raster:
+                    n["raster"] += 1
+                elif swf:
                     n["flash"] += 1
                 else:
-                    n["raster"] += 1
+                    # media-only theme (mp4/flv/audio…): the media IS the
+                    # theme - not a 16:9 conversion candidate
+                    n["video"] += 1
         except Exception:
             n["bad"] += 1
     n["converted_already"] = os.path.isdir(os.path.join(base, "Themes_backup"))

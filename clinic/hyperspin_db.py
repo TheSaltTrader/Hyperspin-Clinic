@@ -45,8 +45,29 @@ def databases_dir(hyperspin_root: str) -> str:
     return ""
 
 
+_RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {
+    f"{p}{i}" for p in ("com", "lpt") for i in range(1, 10)}
+
+
+def _safe_system(name: str) -> bool:
+    """System names become path components everywhere (Databases\\<Sys>,
+    Media\\<Sys>, suite -BaseDir args, revert restore targets). A tampered
+    Main.xml must not be able to escape the HyperSpin folder (OWASP path
+    traversal) or hit reserved Windows device names."""
+    if not name or name.strip() != name:
+        return False
+    if name != os.path.basename(name):
+        return False
+    if ("/" in name) or ("\\" in name) or (".." in name) or (":" in name):
+        return False
+    if name.split(".")[0].lower() in _RESERVED_NAMES:
+        return False
+    return True
+
+
 def list_systems(hyperspin_root: str) -> list:
-    """System names from Databases\\Main\\Main.xml (fallback: folder scan)."""
+    """System names from Databases\\Main\\Main.xml (fallback: folder scan).
+    Names that are not a single safe path component are dropped."""
     dbs = databases_dir(hyperspin_root)
     if not dbs:
         return []
@@ -62,7 +83,7 @@ def list_systems(hyperspin_root: str) -> list:
         systems = [e.name for e in os.scandir(dbs)
                    if e.is_dir() and e.name.lower() != "main"
                    and os.path.isfile(os.path.join(e.path, e.name + ".xml"))]
-    return systems
+    return [s for s in systems if _safe_system(s)]
 
 
 def system_xml_path(hyperspin_root: str, system: str) -> str:
