@@ -28,13 +28,12 @@ class StopRequested(Exception):
     pass
 
 
-# cross-system protection (user rule): a video in ANY system's Video
-# folder is kept whenever another system's XML lists a game of that name
-# and that system lacks its own copy - the MAME folder maintains videos
-# for every subset wheel (good clones, 2 Players, ...). A video whose
-# claimants all hold their own copies stays deletable, which is what
-# keeps subset folders cleanable. The 'parent' (largest MAME-style
-# system) is used by Missing Art's fallback coverage. Cached per session
+# cross-system protection (user rule): a video is ALWAYS protected
+# unless no game with the same name exists in any other system's XML.
+# Name existence alone is enough - no further conditions - because the
+# MAME folder maintains videos for every subset wheel (good clones,
+# 2 Players, ...). The 'parent' (largest MAME-style system) is used by
+# Missing Art's fallback coverage. Cached per session
 # (a TTL that expired while the analysis thread walked ~400 systems made
 # the tab look stuck at 'analyzing').
 _share_cache = {"root": None, "usage": {}, "parent": None, "vstems": {}}
@@ -95,8 +94,9 @@ def _folders(cfg, system):
 def orphans(cfg, system, kinds=KINDS):
     """{kind: [filename, ...]} of top-level files whose stem matches no
     game in the system XML (case-insensitive). A video is additionally
-    protected - in ANY system's folder - while another system lists the
-    game and lacks its own copy; the count goes into out['shared_video'].
+    protected - in ANY system's folder - whenever a game with the same
+    name exists in any OTHER system's XML (name existence alone, no
+    further conditions); the count goes into out['shared_video'].
     out['missing_dirs'] lists art folders that do not exist (path
     diagnosis). Raises OSError when the XML is unreadable."""
     xml = hdb.system_xml_path(cfg["hyperspin_root"], system)
@@ -140,16 +140,13 @@ def orphans(cfg, system, kinds=KINDS):
                 if s in valid:
                     continue
                 if kind == "video":
-                    # protection applies in EVERY system's video folder
-                    # (user rule): a video stays whenever another system
-                    # lists the game and lacks its own copy - regardless
-                    # of which system is being cleaned
+                    # user rule: a video is ALWAYS protected unless no
+                    # game with the same name exists in any other
+                    # system's XML - name existence alone is enough,
+                    # whether or not that system has its own copy
                     if usage is None:
                         usage, parent = _share_info(cfg)
-                    others = [t for t in usage.get(s, ())
-                              if t != system]
-                    if others and any(s not in _own_video_stems(cfg, t)
-                                      for t in others):
+                    if any(t != system for t in usage.get(s, ())):
                         out["shared_video"] += 1
                         continue                # another system needs it
                 found.append(e.name)
