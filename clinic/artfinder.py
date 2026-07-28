@@ -493,13 +493,19 @@ def missing_counts(cfg, system):
         return (0, 0, 0, None)
     paths = media_paths(cfg, system)
     out = []
-    for folder, exts in ((paths["wheel"], (".png", ".jpg")),
-                         (paths["video"], VIDEO_EXTS)):
+    for kind, folder, exts in (("wheel", paths["wheel"], (".png", ".jpg")),
+                               ("video", paths["video"], VIDEO_EXTS)):
         present = set()
         if os.path.isdir(folder):
             for f in os.listdir(folder):
                 if f.lower().endswith(exts):
                     present.add(os.path.splitext(f)[0].lower())
+        if kind == "video":
+            # subset wheels fall back to the parent MAME folder (user
+            # rule) - videos available there are not missing
+            parent, pstems = _parent_video_cover(cfg, system, games)
+            if parent:
+                present |= pstems
         out.append(sum(1 for g in games if g.name.lower() not in present))
     # missing roms are NOT listed anywhere (user rule) - the rom slot
     # stays None; RocketLauncher paths are still used by the Rename tab
@@ -544,8 +550,21 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                 for f in os.listdir(folder):
                     if f.lower().endswith(exts):
                         present.add(os.path.splitext(f)[0].lower())
+            covered, parent = 0, None
+            if art == "video":
+                # user rule: subset wheels fall back to the parent MAME
+                # folder - a video that already exists there is NOT missing
+                parent, pstems = _parent_video_cover(cfg, system, games)
+                if parent:
+                    covered = sum(1 for g in games
+                                  if g.name.lower() not in present
+                                  and g.name.lower() in pstems)
+                    present |= pstems
             missing = [g for g in games if g.name.lower() not in present]
-            log(f"[{system}] {art}: {len(games)} games, {len(missing)} missing")
+            log(f"[{system}] {art}: {len(games)} games, "
+                f"{len(missing)} missing"
+                + (f" ({covered} covered by the {parent} folder fallback)"
+                   if covered else ""))
             if not missing:
                 continue
 
@@ -701,6 +720,23 @@ def _mameish(games) -> bool:
         return False
     hits = sum(1 for n in names if re.fullmatch(r"[a-z0-9_]{1,12}", n))
     return hits >= 0.7 * len(names)
+
+
+def _parent_video_cover(cfg, system, games):
+    """(parent_name, stems) - video stems available in the PARENT (largest)
+    system's folder, which subset wheels use as a fallback (user rule:
+    a video is NOT missing when the MAME folder already has it). Empty
+    for the parent itself and for non-MAME-style systems."""
+    if not _mameish(games):
+        return None, frozenset()
+    try:
+        from . import cleaner
+        _usage, parent = cleaner._share_info(cfg)
+        if not parent or parent == system:
+            return None, frozenset()
+        return parent, frozenset(cleaner._own_video_stems(cfg, parent))
+    except Exception:
+        return None, frozenset()
 
 
 def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
