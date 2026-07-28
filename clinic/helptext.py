@@ -230,7 +230,7 @@ While running you see TWO progress bars: overall (system × step) and
 per-file (n/total files processed, current file name, and a live time
 estimate computed from the actual pace). Stop is always available and
 kills the whole running process tree cleanly. Everything is revertible
-from the Revert tab.
+from the Restore Backups tab.
 
 ━━━ ASK AI (RAG chat) ━━━━━━━━━━━━━━━━━━━━━━━
 Chat about your collection. Every question runs retrieval-augmented
@@ -245,7 +245,7 @@ the API key from Setup; each answer shows chunks used, sources, and
 the question's dollar cost (same tracking as enrichment). The last 6
 turns are kept as conversation context.
 
-━━━ REVERT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ RESTORE BACKUPS (revert) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Lists every system where the Clinic made changes, rebuilt from backups
 and the database logs. Pick the categories to bring back (XML
 metadata, added wheels, added videos, renamed videos / wheel art /
