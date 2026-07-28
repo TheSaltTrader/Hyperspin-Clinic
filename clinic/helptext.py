@@ -104,7 +104,11 @@ halts cleanly between batches.
 
 ━━━ MISSING ART ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Finds missing wheel art and videos for the systems you tick (nothing
-is pre-selected). Sources are tried in the knowledge base's order:
+is pre-selected). Before a VIDEO counts as missing, the parent MAME
+system's folder is checked too — subset wheels use it as a fallback,
+so a video available there is not missing and is never re-downloaded
+(the log shows "N covered by the MAME folder fallback").
+Sources are tried in the knowledge base's order:
  1. LOCAL FIRST — alias-named files already in the system's own folders
     (case / punctuation / region variants, roman numerals). Aliases are
     COPIED to the canonical rom name; nothing is ever renamed or

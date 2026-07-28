@@ -160,7 +160,11 @@ Progress log, per-system progress bar, and a Stop button (finishes the
 current batch, then halts cleanly).
 
 ### Missing Art (implemented)
-Same system list (nothing pre-selected). For each checked system it finds **missing
+Same system list (nothing pre-selected). Before a **video** counts as
+missing, the parent MAME system's folder is checked too — subset
+wheels use it as a fallback, so a video available there is never
+re-downloaded (the log reports "N covered by the MAME folder
+fallback"). For each checked system it finds **missing
 wheel art** and **missing videos** (games from the system database vs.
 `Media\<System>\Images\Wheel` and `Media\<System>\Video`), then works
 through the sources in the knowledge base's order:
