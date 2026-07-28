@@ -281,8 +281,12 @@ def _ffmpeg():
 _BAD_TITLE = re.compile(r"review|reaction|commentary|commentated|let.?s play"
                         r"|face ?cam|unboxing|top ?10|ranking|versus"
                         r"|comparison|podcast|interview|vlog|reacts"
-                        r"|live ?stream|first look|impressions", re.I)
-_BAD_CHANNEL = re.compile(r"IGN|GameSpot|GameTrailers|Kotaku|Polygon|GameXplain", re.I)
+                        r"|live ?stream|first look|impressions"
+                        r"|why the|hype|retrospective|analysis|explained"
+                        r"|history of|worth|before you|hidden gem"
+                        r"|underrated|overrated|docu|iceberg|essay|\?", re.I)
+_BAD_CHANNEL = re.compile(r"IGN|GameSpot|GameTrailers|Kotaku|Polygon"
+                          r"|GameXplain|drunk|Retrospective|Essay", re.I)
 # channels the knowledge base's runs rated as clean gameplay/longplays -
 # candidates from them (or explicitly 'no commentary'/'longplay' titles)
 # are preferred
@@ -525,7 +529,9 @@ def _snap_transcode(src, dst, log, max_len=60, target_43=False):
             # still widescreen after (or without) a crop -> squeeze to 4:3
             vf.append("scale=640:480")
             note43 = ", resized to 4:3"
-        elif 1.15 <= aspect <= 1.42:
+        elif 1.05 <= aspect <= 1.42:
+            # includes consoles whose native signal is ~8:7 (SNES 256x224)
+            # but which display as 4:3 on a real TV
             # near-4:3 (cropdetect never lands exactly): normalize to a
             # true 640x480 so the output IS 4:3
             vf.append("scale=640:480")
