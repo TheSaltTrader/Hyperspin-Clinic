@@ -584,17 +584,29 @@ def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
         log(f"    youtube: searching with system term '{sys_term.strip()}' — "
             f"framing target {'4:3' if target_43 else '16:9 (widescreen)'}")
     ladder = (
-        (f"ytsearch6:{title}{sys_term} gameplay", 45, 420, None),
-        (f"ytsearch6:{title}{sys_term} longplay", 600, None, "*00:01:00-00:03:00"),
-        (f"ytsearch6:{title}{sys_term} trailer", 45, 300, None),
+        (f"ytsearch6:{title}{sys_term} gameplay", 45, 420, "gameplay"),
+        (f"ytsearch6:{title}{sys_term} longplay", 600, None, "longplay"),
+        (f"ytsearch6:{title}{sys_term} trailer", 45, 300, "trailer"),
     )
 
+    def pick_section(kind, duration):
+        # user rule: long videos skip an EXTRA 2 minutes so the snap
+        # lands past title screens, story and menus
+        if kind == "longplay":
+            return "*00:03:00-00:05:00"
+        if kind == "gameplay" and duration >= 240:
+            return "*00:02:00-00:04:00"
+        return None
+
     def attempt():
-        for query, lo, hi, section in ladder:
+        for query, lo, hi, kind in ladder:
             pick = _pick(_yt_search(yt, query, auth, log), title, lo, hi,
                          system=system)
             if not pick:
                 continue
+            section = pick_section(kind, pick["duration"])
+            if section:
+                log(f"    youtube: skipping intro — sampling {section.strip('*')}")
             if _yt_download(yt, pick["id"], tmp, auth, log, section):
                 note = _snap_transcode(tmp, dst_path, log,
                                        target_43=target_43)
