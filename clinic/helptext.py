@@ -134,14 +134,18 @@ Sources are tried in the knowledge base's order:
     packs don't cover (MAME has no Logos pack). Every download is
     decode-verified and must be genuinely transparent, then curated
     like every wheel.
- 4. YOUTUBE — videos only, via yt-dlp when installed. The finder
-    SEARCHES first and picks the best candidate itself (gameplay,
-    else a 2-minute slice of a longplay, else a trailer), rejecting
-    review/reaction titles and watermark channels, and requiring the
-    video title to actually contain the game name. The result is then
-    processed with FFMPEG (bundled with the Theme Suite): black bars
-    cropped, cut to a 60-second snap with fade in/out, normalized to
-    H.264. If downloads fail with "sign in to confirm" or "the page
+ 4. YOUTUBE — videos only, via yt-dlp when installed. The search is
+    ALWAYS "<game> <system>", and a candidate's title must contain
+    BOTH the game name AND the system (user rule). Reviews, reactions
+    and commentary-over-gameplay are rejected — only original
+    gameplay/game music — and known clean longplay channels are
+    preferred. The result is then processed with FFMPEG (bundled with
+    the Theme Suite): black side bars cropped; for 4:3 systems
+    (everything that is not a widescreen platform like PS3/360/PSP/PC)
+    the output is a TRUE 4:3 — bars cropped to 4:3, or a bar-less
+    stretched widescreen source is resized back to 4:3; vertical
+    arcade content keeps its native shape. Cut to a 60-second snap
+    with fade in/out, normalized to H.264. If downloads fail with "sign in to confirm" or "the page
     needs to be reloaded", UPDATE yt-dlp and/or configure YouTube
     sign-in on the Setup tab.
     YT-DLP UPDATES: at every startup the app checks for a new yt-dlp
