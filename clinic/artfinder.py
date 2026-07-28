@@ -926,7 +926,7 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
         # the actual downloads. Live listing is the fallback.
         raw_pools = []
         from . import emucatalog
-        for vd, fl in emucatalog.video_pools(cat, system):
+        for vd, fl in emucatalog.video_pools(cat, system, cfg):
             raw_pools.append((vd, fl, "catalog"))
         if not raw_pools:
             for vd in emu.find_video_dirs(system):
@@ -935,7 +935,7 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
             # custom MAME-subset wheels (Arcade Shmups, Cave, Capcom Play
             # System…) hold MAME roms - their snaps live in the MAME
             # Arcade folders
-            for vd, fl in emucatalog.video_pools(cat, "MAME"):
+            for vd, fl in emucatalog.video_pools(cat, "MAME", cfg):
                 raw_pools.append((vd, fl, "catalog, MAME-subset fallback"))
             if not raw_pools:
                 for vd in emu.find_video_dirs("MAME"):
@@ -945,9 +945,10 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
                 log(f"[{system}] EmuMovies: rom-style names detected — "
                     f"treating as a MAME subset (MAME Arcade folders)")
         if not raw_pools:
-            log(f"[{system}] EmuMovies: no video-snap folder matched — if "
-                f"one exists, add it to data\\emumovies_map.json under "
-                f"'video::{system}'")
+            log(f"[{system}] EmuMovies: no video-snap folder matched "
+                f"(trained map, name aliases and the semantic folder "
+                f"index were all tried) — if one exists, add it to "
+                f"data\\emumovies_map.json under 'video::{system}'")
             return still
         # highest quality first, PER GAME: HD sets are often WIP and
         # incomplete, so each game cascades HD -> HQ -> SQ (user rule)

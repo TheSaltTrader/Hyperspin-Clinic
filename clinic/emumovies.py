@@ -33,6 +33,28 @@ def _toks(s):
     return set(_nrm(s).split())
 
 
+_ROMAN = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6"}
+
+
+def _numbers(s):
+    """Model numbers in a name, roman numerals normalized (II -> 2)."""
+    return {_ROMAN.get(t, t) for t in _nrm(s).split()
+            if t.isdigit() or t in _ROMAN}
+
+
+# HyperSpin database names and EmuMovies folder names that share no
+# tokens at all - no matcher can bridge these, so they are spelled out,
+# normalized on both sides (user-reported: a system showed 'no folder
+# matched' although its snaps exist - Capcom Play System II lives under
+# 'Capcom CPS-2')
+_ALIASES = {
+    "capcom play system": "capcom cps 1",
+    "capcom play system i": "capcom cps 1",
+    "capcom play system ii": "capcom cps 2",
+    "capcom play system iii": "capcom cps 3",
+}
+
+
 def resolve_name(system, names):
     """Match a HyperSpin system name to an EmuMovies folder name.
     Token-based so vendor prefixes don't matter (Dreamcast <-> Sega
@@ -44,6 +66,11 @@ def resolve_name(system, names):
     for n, b in base.items():                      # exact base name
         if _nrm(b) == _nrm(system):
             return n
+    alias = _ALIASES.get(" ".join(_nrm(system).split()))
+    if alias:                                      # known naming gap
+        for n, b in base.items():
+            if " ".join(_nrm(b).split()) == alias:
+                return n
     best, extra = None, 99                          # folder ⊇ system tokens
     for n, b in base.items():
         bt = _toks(b)
