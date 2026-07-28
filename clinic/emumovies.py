@@ -13,11 +13,18 @@ import time
 import zipfile
 
 HOST = "files.emumovies.com"
-# quality priority is HIGHEST first (user rule): HD, then HQ, then SQ
+# quality priority is HIGHEST first (user rule): HD, then HQ, then SQ.
+# The Video Themes trees come AFTER the snap trees (real gameplay snaps
+# are preferred) but they are essential: some systems exist ONLY there -
+# user-reported, NesicaXlive's videos live under 'Official/Video Themes
+# (HQ)/Taito NESiCAxLive (Video Themes-HyperSpin)(4x3)...' and the
+# system showed 'not available' while these roots were not crawled.
 VIDEO_ROOTS = [
     "Official/Video Snaps (HD)",
     "Official/Video Snaps (HQ)",
     "Official/Video Snaps (SQ)",
+    "Official/Video Themes (HD)",
+    "Official/Video Themes (HQ)",
 ]
 ARTWORK_ROOT = "Official/Artwork"
 
@@ -52,6 +59,8 @@ _ALIASES = {
     "capcom play system i": "capcom cps 1",
     "capcom play system ii": "capcom cps 2",
     "capcom play system iii": "capcom cps 3",
+    "nesica x live": "taito nesicaxlive",
+    "nesicaxlive": "taito nesicaxlive",
 }
 
 

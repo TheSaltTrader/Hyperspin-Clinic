@@ -296,21 +296,11 @@ _GOOD_SOURCE = re.compile(r"World of Longplays|LongplayArchive|AL82"
                           r"|XCageGame|NintendoComplete", re.I)
 _GOOD_TITLE = re.compile(r"longplay|no ?commentary|playthrough", re.I)
 
-# widescreen systems (everything else in a HyperSpin collection is 4:3 -
-# user rule: identify the non-widescreen systems so their videos can be
-# cropped/resized to 4:3)
-_WIDE_TOKENS = ("ps3", "playstation 3", "ps4", "playstation 4", "ps5",
-                "playstation 5", "xbox 360", "xbox one", "series x",
-                "xbla", "xbox live", "wii u", "switch", "psp", "vita",
-                "pc games", "pc engine cd?", "steam", "windows", "teknoparrot")
-
-
 def system_is_43(system: str) -> bool:
-    s = " " + re.sub(r"[^a-z0-9 ]", " ", system.lower()) + " "
-    for tok in _WIDE_TOKENS:
-        if tok in s:
-            return False
-    return True
+    """True only for all-4:3 systems; the aspect knowledge base
+    (data\\aspect_db.json) is the single source of truth."""
+    from . import aspectdb
+    return aspectdb.system_class(system) == "4:3"
 
 
 # stop-words that carry no identity when matching the system name inside
@@ -507,18 +497,22 @@ def _src_dims(ff, src):
 
 def _snap_transcode(src, dst, log, max_len=60, target_43=False):
     """Knowledge-base post-processing: crop bars, cut to snap length with
-    fades, normalize to H.264/AAC. For 4:3 systems (user rule): side
-    bars are cropped so the result IS 4:3, and a bar-less widescreen
-    source is RESIZED to 4:3 so the game is no longer stretched.
-    Vertical (arcade) content is left at its native aspect. Without
-    ffmpeg the raw file is kept."""
+    fades, normalize to H.264/AAC. target_43 True = force 4:3 (user
+    rule): side bars are cropped so the result IS 4:3, and a bar-less
+    widescreen source is RESIZED to 4:3 so the game is no longer
+    stretched. target_43 'auto' (mixed post-2000 arcade systems): the
+    bar-cropped CONTENT decides - near-4:3 content is normalized to
+    4:3, wide content stays 16:9 - and the verdict is reported back so
+    the aspect database can learn the game. Vertical (arcade) content
+    is left at its native aspect. Returns (note, detected_aspect).
+    Without ffmpeg the raw file is kept."""
     ff = _ffmpeg()
     if not ff:
         os.replace(src, dst)
-        return "raw (no ffmpeg found)"
+        return "raw (no ffmpeg found)", None
     crop = _crop_union(ff, src, log)
     vf = [crop] if crop else []
-    note43 = ""
+    note43, detected = "", None
     if target_43:
         if crop:
             m = re.match(r"crop=(\d+):(\d+)", crop)
@@ -527,9 +521,14 @@ def _snap_transcode(src, dst, log, max_len=60, target_43=False):
             eff_w, eff_h = _src_dims(ff, src)
         aspect = (eff_w / eff_h) if eff_h else 0
         if aspect > 1.42:
-            # still widescreen after (or without) a crop -> squeeze to 4:3
-            vf.append("scale=640:480")
-            note43 = ", resized to 4:3"
+            if target_43 == "auto":
+                # content is genuinely widescreen: this is a 16:9 game
+                detected = "16:9"
+                note43 = ", kept 16:9 (content is widescreen)"
+            else:
+                # still widescreen after (or without) a crop -> squeeze
+                vf.append("scale=640:480")
+                note43 = ", resized to 4:3"
         elif 1.05 <= aspect <= 1.42:
             # includes consoles whose native signal is ~8:7 (SNES 256x224)
             # but which display as 4:3 on a real TV
@@ -537,7 +536,12 @@ def _snap_transcode(src, dst, log, max_len=60, target_43=False):
             # true 640x480 so the output IS 4:3
             vf.append("scale=640:480")
             note43 = (", bars cropped to 4:3" if crop else ", normalized to 4:3")
-        # aspect < 1.15 = vertical (arcade) content: keep native
+            if target_43 == "auto":
+                detected = "4:3"
+        elif aspect and target_43 == "auto":
+            # vertical content = a rotated 4:3 cabinet
+            detected = "4:3"
+        # aspect < 1.05 = vertical (arcade) content: keep native
     vf += ["scale=-2:'trunc(min(480,ih)/2)*2'", "setsar=1",
            "fade=t=in:st=0:d=1", f"fade=t=out:st={max_len - 2}:d=2"]
     r = subprocess.run(
@@ -552,13 +556,14 @@ def _snap_transcode(src, dst, log, max_len=60, target_43=False):
             os.remove(src)
         except OSError:
             pass
-        return (f"{max_len}s snap" + (", bars cropped" if crop else "") + note43)
+        return (f"{max_len}s snap" + (", bars cropped" if crop else "")
+                + note43), detected
     os.replace(src, dst)                     # transcode failed: keep raw
-    return "raw (transcode failed)"
+    return "raw (transcode failed)", None
 
 
 def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
-                  system=None):
+                  system=None, game=None, year=None):
     """Search-then-pick ladder from the media-pipeline knowledge base:
     gameplay, else a section of a longplay - GAME FOOTAGE ONLY (user
     rule): no trailers and no unfiltered fallback, and every download
@@ -582,10 +587,18 @@ def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
         sys_term = " " + ("arcade" if ("mame" in system.lower()
                                        or "arcade" in system.lower())
                           else system)
-    target_43 = system_is_43(system) if system else False
+    # per-GAME aspect from the knowledge base (user rule): 4:3 systems
+    # force 4:3, 16:9 systems keep widescreen, MIXED post-2000 arcade
+    # systems (NesicaXlive, Type X, ...) decide per game - trained
+    # entry, else pre-2000 year = 4:3, else the video's own content
+    from . import aspectdb
+    aspect = aspectdb.game_aspect(system, game or title, year) \
+        if system else "16:9"
+    target_43 = {"4:3": True, "16:9": False}.get(aspect, "auto")
     if system:
         log(f"    youtube: searching with system term '{sys_term.strip()}' — "
-            f"framing target {'4:3' if target_43 else '16:9 (widescreen)'}")
+            f"framing target "
+            + (aspect or "auto (mixed system, the content decides)"))
     ladder = (
         # gameplay lower bound 105s: every video must afford the 1-minute
         # intro skip and still leave a 45s+ snap
@@ -616,9 +629,12 @@ def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
             if section:
                 log(f"    youtube: skipping intro — sampling {section.strip('*')}")
             if _yt_download(yt, pick["id"], tmp, auth, log, section):
-                note = _snap_transcode(tmp, dst_path, log,
-                                       target_43=target_43)
+                note, detected = _snap_transcode(tmp, dst_path, log,
+                                                 target_43=target_43)
                 log(f"    youtube: '{pick['title'][:50]}' ({pick['uploader'][:24]}) — {note}")
+                if detected and system:
+                    aspectdb.record(cfg, system, game or title, detected,
+                                    "video content analysis", log)
                 return True
         # no unfiltered fallback (user rule): better no video than one
         # showing anything other than the game itself
@@ -849,7 +865,8 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                         title = g.description or g.name
                         if youtube_video(title, dst, log, cfg,
                                          check_stop=check_stop,
-                                         system=system):
+                                         system=system, game=g.name,
+                                         year=g.year):
                             added.append({"system": system, "game": g.name,
                                           "art": art, "source": "youtube",
                                           "path": dst})
