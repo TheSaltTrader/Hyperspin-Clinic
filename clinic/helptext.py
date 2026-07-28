@@ -173,7 +173,10 @@ always ignores caps; a "[folder not found: …]" note in the analysis
 line means the art folder's name/path does not match.
 Removed files are MOVED to clinic_backups\\orphans_<stamp>\\ inside
 the art folder (restorable by hand), logged to data\\cleanup.log and
-tracked in the database.
+tracked in the database. A progress bar shows the run and a pop-up
+confirms when everything was deleted. The "Clear backups" button
+PERMANENTLY deletes those orphans_* backup folders (red warning
+first — restored-by-hand is then no longer possible).
 
 ━━━ RENAME ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Matches wrongly-named files to database names — ONE system at a time
@@ -256,6 +259,11 @@ systems, and Revert:
  • installed video themes -> original theme zips and video snaps
    restored from the *_pre_videotheme backups.
 Reverts are themselves logged (data\\reverts.log) and tracked.
+The "Clear ALL backups" button PERMANENTLY deletes every backup this
+tab's reverts rely on (XML backups, rename backups, theme-suite
+backups) after a RED-TEXT warning: THIS DELETES THE SYSTEM'S RESTORE
+CAPABILITIES — existing changes can no longer be reverted. A progress
+bar shows the run and a completion pop-up confirms the result.
 
 ━━━ DATA & SAFETY ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • settings.json: non-secret settings only (folders, engine URLs).

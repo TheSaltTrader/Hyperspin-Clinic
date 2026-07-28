@@ -230,3 +230,76 @@ def revert(cfg, systems, categories, log=print):
 
     _track_reverts(cfg, reverted_raws_art + reverted_raws_ren, log)
     return count
+
+
+class StopRequested(Exception):
+    pass
+
+
+def backup_items(cfg):
+    """[(label, path)] of every backup this tab's reverts rely on:
+    XML clinic_backups, rename backups (timestamped clinic_backups
+    subfolders in art/rom folders - Clear Extras' orphans_* folders are
+    NOT included, that tab has its own button), and the Theme Suite's
+    Themes_backup / *_pre_videotheme folders."""
+    out = []
+    root = cfg.get("hyperspin_root", "")
+    from .artfinder import media_paths, system_media_base
+    seen = set()
+
+    def add(label, path):
+        p = os.path.normpath(path)
+        if p.lower() not in seen and os.path.isdir(p):
+            seen.add(p.lower())
+            out.append((label, p))
+
+    for system in hdb.list_systems(root):
+        add(f"{system}: XML backups", os.path.join(
+            os.path.dirname(hdb.system_xml_path(root, system)),
+            "clinic_backups"))
+        p = media_paths(cfg, system)
+        base = system_media_base(cfg, system)
+        for label, folder in (("wheel", p["wheel"]), ("video", p["video"]),
+                              ("themes", os.path.join(base, "Themes"))):
+            cb = os.path.join(folder, "clinic_backups")
+            if os.path.isdir(cb):
+                for s in os.listdir(cb):
+                    sp = os.path.join(cb, s)
+                    if os.path.isdir(sp) and not s.startswith("orphans_"):
+                        add(f"{system}: {label} rename backups {s}", sp)
+        for name in ("Themes_backup", "Themes_backup_pre_videotheme",
+                     "Video_backup_pre_videotheme"):
+            add(f"{system}: {name}", os.path.join(base, name))
+    # rom-folder rename backups live wherever renames.log points
+    for e in _ren_entries():
+        cb = os.path.join(e["folder"], "clinic_backups")
+        if os.path.isdir(cb):
+            for s in os.listdir(cb):
+                sp = os.path.join(cb, s)
+                if os.path.isdir(sp) and not s.startswith("orphans_"):
+                    add(f"{e['system']}: rom rename backups {s}", sp)
+    return out
+
+
+def clear_backups(cfg, log, stop_flag=lambda: False, progress=None):
+    """PERMANENTLY delete every backup the Revert tab relies on - after
+    this, existing changes can no longer be restored. Returns
+    (folders_removed, files_removed)."""
+    items = backup_items(cfg)
+    ndirs = nfiles = 0
+    for i, (label, path) in enumerate(items):
+        if stop_flag():
+            raise StopRequested()
+        if progress:
+            progress(i, len(items), label)
+        try:
+            n = sum(len(fs) for _r, _d, fs in os.walk(path))
+            shutil.rmtree(path)
+            ndirs += 1
+            nfiles += n
+            log(f"  cleared {label} ({n} file(s))")
+        except OSError as e:
+            log(f"  could not clear {label}: {e}")
+    log(f"DONE — {ndirs} backup location(s) / {nfiles} file(s) permanently "
+        f"deleted. Existing changes can NO LONGER be reverted.")
+    return ndirs, nfiles

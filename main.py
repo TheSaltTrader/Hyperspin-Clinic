@@ -895,6 +895,32 @@ class ClinicApp(tk.Tk):
     def _art_log(self, msg):
         self._logq.put(("art", msg))
 
+    def _danger_confirm(self, title, message):
+        """Modal confirm with the warning in RED text (user rule for
+        destructive backup clearing - messagebox cannot render color)."""
+        dlg = tk.Toplevel(self)
+        dlg.title(title)
+        dlg.configure(bg=BG)
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+        ttk.Label(dlg, text="⚠ " + title,
+                  font=("Segoe UI", 12, "bold")).pack(padx=20, pady=(16, 6))
+        tk.Label(dlg, text=message, fg=BAD, bg=BG, wraplength=440,
+                 justify="left", font=("Segoe UI", 10, "bold")).pack(
+            padx=20, pady=(0, 14))
+        out = {"ok": False}
+        row = ttk.Frame(dlg)
+        row.pack(pady=(0, 14))
+
+        def go():
+            out["ok"] = True
+            dlg.destroy()
+        ttk.Button(row, text="Continue", command=go).pack(side="left", padx=6)
+        ttk.Button(row, text="Cancel", command=dlg.destroy).pack(side="left", padx=6)
+        dlg.wait_window()
+        return out["ok"]
+
     # ---------- Clear Extras tab ----------
     def _build_clear(self, tab):
         from clinic import cleaner
@@ -937,6 +963,12 @@ class ClinicApp(tk.Tk):
             run, text="■ Stop", state="disabled",
             command=lambda: setattr(self, "_clear_stop", True))
         self.btn_clear_stop.pack(side="left", padx=(8, 0))
+        ttk.Button(run, text="🧹 Clear backups",
+                   command=self._clear_extras_backups).pack(side="left", padx=(8, 0))
+        self.pb_clear = ttk.Progressbar(run, mode="determinate", length=140)
+        self.pb_clear.pack(side="right")
+        self.lbl_clear_status = ttk.Label(run, text="", style="Status.TLabel")
+        self.lbl_clear_status.pack(side="right", padx=(0, 8))
         self.txt_clear_log = scrolled_log(
             tab, {"fill": "both", "expand": True, "pady": (4, 12), **pad},
             height=10, font=("Consolas", 9), wrap="word")
@@ -974,25 +1006,86 @@ class ClinicApp(tk.Tk):
         self.btn_clear_stop.configure(state="normal")
         cfg = dict(self.cfg)
 
+        n_sel = len(selected)
+        self.pb_clear.configure(maximum=n_sel * 100, value=0)
+
+        def status(idx, msg):
+            self.after(0, lambda: (
+                self.pb_clear.configure(value=idx * 100),
+                self.lbl_clear_status.configure(
+                    text=f"{round(idx / n_sel * 100)}% — {msg}")))
+
         def worker():
             total = 0
+            stopped = False
             try:
-                for s_name in selected:
+                for i, s_name in enumerate(selected):
                     if self._clear_stop:
+                        stopped = True
                         self._clear_log("— stopped by user —")
                         break
+                    status(i, s_name)
                     total += cleaner.clean_system(
                         cfg, s_name, kinds, self._clear_log,
                         stop_flag=lambda: self._clear_stop)
             except cleaner.StopRequested:
+                stopped = True
                 self._clear_log("— stopped by user —")
             except Exception as e:
                 self._clear_log(f"ERROR: {e}")
             self._clear_log(f"DONE — {total} file(s) cleared.")
+
+            def finish(t=total, s=stopped):
+                self.pb_clear.configure(value=n_sel * 100)
+                self.lbl_clear_status.configure(text="done")
+                self.btn_clear.configure(state="normal")
+                self.btn_clear_stop.configure(state="disabled")
+                self.clear_list.reload()
+                if not s:
+                    messagebox.showinfo(
+                        "Clear Extras — complete",
+                        f"All done: {t} extra file(s) were deleted across "
+                        f"{n_sel} system(s).\n\nThey were moved to "
+                        "clinic_backups and can be restored by hand — or "
+                        "removed for good with the 'Clear backups' button.")
+            self.after(0, finish)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _clear_extras_backups(self):
+        from clinic import cleaner
+        if not self._danger_confirm(
+                "Clear Extras backups",
+                "This PERMANENTLY deletes every backup created by Clear "
+                "Extras deletions (the orphans_* folders).\n\nFiles removed "
+                "by Clear Extras can then NO LONGER be restored."):
+            return
+        cfg = dict(self.cfg)
+        self.btn_clear.configure(state="disabled")
+
+        def progress(i, total, label):
             self.after(0, lambda: (
-                self.btn_clear.configure(state="normal"),
-                self.btn_clear_stop.configure(state="disabled"),
-                self.clear_list.reload()))
+                self.pb_clear.configure(maximum=max(1, total) * 100,
+                                        value=i * 100),
+                self.lbl_clear_status.configure(
+                    text=f"{round(i / max(1, total) * 100)}% — {label}")))
+
+        def worker():
+            try:
+                ndirs, nfiles = cleaner.clear_backups(
+                    cfg, self._clear_log, progress=progress)
+            except Exception as e:
+                self._clear_log(f"ERROR: {e}")
+                ndirs = nfiles = 0
+
+            def finish():
+                self.pb_clear.configure(value=self.pb_clear["maximum"])
+                self.lbl_clear_status.configure(text="done")
+                self.btn_clear.configure(state="normal")
+                messagebox.showinfo(
+                    "Backups cleared",
+                    f"{ndirs} backup folder(s) / {nfiles} file(s) were "
+                    "permanently deleted.")
+            self.after(0, finish)
         threading.Thread(target=worker, daemon=True).start()
 
     def _rebuild_emucat(self):
@@ -1429,8 +1522,12 @@ class ClinicApp(tk.Tk):
         run.pack(fill="x", pady=(8, 2), **pad)
         self.btn_revert = ttk.Button(run, text="↩ Revert selected", command=self._rv_apply)
         self.btn_revert.pack(side="left")
+        ttk.Button(run, text="🧹 Clear ALL backups",
+                   command=self._rv_clear_backups).pack(side="left", padx=(8, 0))
+        self.pb_rv = ttk.Progressbar(run, mode="determinate", length=140)
+        self.pb_rv.pack(side="right")
         self.lbl_rv_status = ttk.Label(run, text="", style="Sub.TLabel")
-        self.lbl_rv_status.pack(side="right")
+        self.lbl_rv_status.pack(side="right", padx=(0, 8))
 
         self.txt_rv_log = scrolled_log(
             tab, {"fill": "both", "expand": True, "pady": (6, 12), **pad},
@@ -1484,6 +1581,50 @@ class ClinicApp(tk.Tk):
                 "No recorded changes" + (" for the selected categories." if cats
                                          else " yet."))).pack(anchor="w", padx=8, pady=8)
         self.lbl_rv_count.configure(text=f"{shown} system(s) with changes")
+
+    def _rv_clear_backups(self):
+        from clinic import reverter
+        if not self._danger_confirm(
+                "Clear ALL backups",
+                "This PERMANENTLY deletes every backup the Clinic has made "
+                "for this tab's work: XML metadata backups, rename backups, "
+                "converted-theme backups and video-theme backups.\n\n"
+                "THIS WILL DELETE THE RESTORE CAPABILITIES OF THE SYSTEM — "
+                "existing changes can no longer be reverted."):
+            return
+        cfg = dict(self.cfg)
+        self.btn_revert.configure(state="disabled")
+
+        def progress(i, total, label):
+            self.after(0, lambda: (
+                self.pb_rv.configure(maximum=max(1, total) * 100,
+                                     value=i * 100),
+                self.lbl_rv_status.configure(
+                    text=f"{round(i / max(1, total) * 100)}% — {label[:44]}")))
+
+        def worker():
+            try:
+                ndirs, nfiles = reverter.clear_backups(
+                    cfg, self._rv_logline_threadsafe, progress=progress)
+            except Exception as e:
+                self._rv_logline_threadsafe(f"ERROR: {e}")
+                ndirs = nfiles = 0
+
+            def finish():
+                self.pb_rv.configure(value=self.pb_rv["maximum"])
+                self.lbl_rv_status.configure(text="done")
+                self.btn_revert.configure(state="normal")
+                self._rv_refresh()
+                messagebox.showinfo(
+                    "Backups cleared",
+                    f"{ndirs} backup location(s) / {nfiles} file(s) were "
+                    "permanently deleted.\n\nExisting changes can no longer "
+                    "be reverted. Press OK to continue.")
+            self.after(0, finish)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _rv_logline_threadsafe(self, msg):
+        self.after(0, lambda: self._rv_logline(msg))
 
     def _rv_apply(self):
         from clinic import reverter
