@@ -160,7 +160,10 @@ how many extras exist per art type. Pick the art types (Wheel art /
 Videos / Themes), press Delete, and confirm the warning: the selected
 art types' files that do not exist in each selected system's XML are
 removed, because the system does not use them. NEVER touched: the
-Themes default.zip and any folders inside the art-type folders.
+Themes default.zip, any folders inside the art-type folders, and any
+VIDEO whose name appears in ANY other system's database — the MAME
+video folder is shared by subset wheels, so every system's XML is
+checked before a video may be removed (matching ignores caps).
 Removed files are MOVED to clinic_backups\\orphans_<stamp>\\ inside
 the art folder (restorable by hand), logged to data\\cleanup.log and
 tracked in the database.

@@ -962,8 +962,10 @@ class ClinicApp(tk.Tk):
                 f"art types ({', '.join(pretty[k] for k in kinds)}) whose "
                 "files do NOT exist in each system's database XML will be "
                 "REMOVED — they are not used by the system.\n\n"
-                "Never touched: the Themes default.zip and any folders "
-                "inside the art-type folders.\n\n"
+                "Never touched: the Themes default.zip, any folders inside "
+                "the art-type folders, and any VIDEO whose name is used by "
+                "another system's database (shared MAME folder "
+                "protection).\n\n"
                 "Removed files are moved to clinic_backups (restorable). "
                 "Proceed?"):
             return
