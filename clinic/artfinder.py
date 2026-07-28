@@ -108,9 +108,36 @@ def media_dir(root):
     return media
 
 
-def media_paths(cfg, system):
+_sysdir_cache = {}
+
+
+def system_media_base(cfg, system):
+    """The system's folder under Media. When Media\\<system> does not
+    exist, fall back to a NORMALIZED match (spaces/punctuation/case
+    ignored) - user report: the 'Hyper Neo Geo 64' wheel's media folder
+    was named 'Hyperneogeo64', so every art file counted as missing."""
     media = media_dir(cfg["hyperspin_root"])
     base = os.path.join(media, system)
+    if os.path.isdir(base):
+        return base
+    key = (media, system.lower())
+    if key in _sysdir_cache:
+        return _sysdir_cache[key]
+    want = re.sub(r"[^a-z0-9]", "", system.lower())
+    found = base
+    try:
+        for e in os.scandir(media):
+            if e.is_dir() and re.sub(r"[^a-z0-9]", "", e.name.lower()) == want:
+                found = e.path
+                break
+    except OSError:
+        pass
+    _sysdir_cache[key] = found
+    return found
+
+
+def media_paths(cfg, system):
+    base = system_media_base(cfg, system)
     return {
         "wheel": os.path.join(base, "Images", "Wheel"),
         "video": os.path.join(base, "Video"),

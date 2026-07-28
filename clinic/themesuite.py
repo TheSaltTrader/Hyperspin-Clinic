@@ -37,7 +37,9 @@ def looks_valid(suite_root):
 
 
 def system_dir(cfg, system):
-    return os.path.join(media_dir(cfg["hyperspin_root"]), system)
+    # normalized fallback: 'Hyper Neo Geo 64' finds 'Hyperneogeo64' etc.
+    from .artfinder import system_media_base
+    return system_media_base(cfg, system)
 
 
 # pids of suite children currently running, so the app can kill the whole
