@@ -30,6 +30,9 @@ from . import hyperspin_db as hdb
 from . import secrets, store
 
 VIDEO_EXTS = (".mp4", ".flv", ".avi")
+# presence rule (user): ONLY real videos count - a jpg/png (or avi)
+# bearing the game's name in the Video folder does not satisfy a snap
+VIDEO_PRESENT_EXTS = (".mp4", ".flv")
 
 _RESERVED = {"con", "prn", "aux", "nul"}
 _RESERVED |= {"com%d" % i for i in range(1, 10)}
@@ -144,6 +147,26 @@ def media_paths(cfg, system):
         "wheel": os.path.join(base, "Images", "Wheel"),
         "video": os.path.join(base, "Video"),
     }
+
+
+def purge_video_placeholders(folder, game_name, log):
+    """After a real video was downloaded for the game, delete its jpg/png
+    placeholder files from the Video folder (user rule: the new video
+    replaces them)."""
+    want = game_name.lower()
+    try:
+        for e in os.scandir(folder):
+            if not e.is_file():
+                continue
+            stem, ext = os.path.splitext(e.name)
+            if stem.lower() == want and ext.lower() in (".jpg", ".jpeg", ".png"):
+                try:
+                    os.remove(e.path)
+                    log(f"    replaced placeholder image '{e.name}'")
+                except OSError as err:
+                    log(f"    could not remove placeholder '{e.name}': {err}")
+    except OSError:
+        pass
 
 
 def existing_map(folder, exts):
@@ -523,7 +546,7 @@ def missing_counts(cfg, system):
     paths = media_paths(cfg, system)
     out = []
     for kind, folder, exts in (("wheel", paths["wheel"], (".png", ".jpg")),
-                               ("video", paths["video"], VIDEO_EXTS)):
+                               ("video", paths["video"], VIDEO_PRESENT_EXTS)):
         present = set()
         if os.path.isdir(folder):
             for f in os.listdir(folder):
@@ -562,7 +585,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
     if opts.get("wheel"):
         jobs.append(("wheel", paths["wheel"], (".png",)))
     if opts.get("video"):
-        jobs.append(("video", paths["video"], VIDEO_EXTS))
+        jobs.append(("video", paths["video"], VIDEO_PRESENT_EXTS))
 
     emu = None
     emu_cat = None
@@ -706,6 +729,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                                           "art": art, "source": "youtube",
                                           "path": dst})
                             log(f"  + {g.name} video from youtube")
+                            purge_video_placeholders(folder, g.name, log)
                         else:
                             still.append(g)
                     missing = still
@@ -866,6 +890,7 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
                         f"({size // 1024} KB"
                         + (", ES-verified" if "es-match" in via else "")
                         + (f", via alias" if "alias" in via else "") + ")")
+                    purge_video_placeholders(folder, g.name, log)
                     continue
                 except Exception as e:
                     log(f"    download failed for {g.name}: {e}")
