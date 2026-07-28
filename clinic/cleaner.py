@@ -193,6 +193,47 @@ def clean_system(cfg, system, kinds, log, stop_flag):
     return len(removed)
 
 
+def backup_dirs(cfg):
+    """[(system, kind, path)] of every orphans_* backup folder the Clear
+    Extras deletions created, across all systems."""
+    out = []
+    for system in hdb.list_systems(cfg.get("hyperspin_root", "")):
+        for kind, folder in _folders(cfg, system).items():
+            cb = os.path.join(folder, "clinic_backups")
+            if not os.path.isdir(cb):
+                continue
+            for s in os.listdir(cb):
+                p = os.path.join(cb, s)
+                if s.startswith("orphans_") and os.path.isdir(p):
+                    out.append((system, kind, p))
+    return out
+
+
+def clear_backups(cfg, log, stop_flag=lambda: False, progress=None):
+    """PERMANENTLY delete every Clear Extras backup folder. Returns
+    (folders_removed, files_removed)."""
+    import shutil
+    dirs = backup_dirs(cfg)
+    nfiles = ndirs = 0
+    for i, (system, kind, p) in enumerate(dirs):
+        if stop_flag():
+            raise StopRequested()
+        if progress:
+            progress(i, len(dirs), f"{system} ({kind})")
+        try:
+            n = sum(len(fs) for _r, _d, fs in os.walk(p))
+            shutil.rmtree(p)
+            ndirs += 1
+            nfiles += n
+            log(f"  cleared {system} {kind} backup "
+                f"{os.path.basename(p)} ({n} file(s))")
+        except OSError as e:
+            log(f"  could not clear {p}: {e}")
+    log(f"DONE — {ndirs} backup folder(s) / {nfiles} file(s) permanently "
+        f"deleted.")
+    return ndirs, nfiles
+
+
 def _track(cfg, system, removed, log):
     os.makedirs(config.DATA_DIR, exist_ok=True)
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
