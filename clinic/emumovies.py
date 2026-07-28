@@ -6,16 +6,89 @@
 import difflib
 import ftplib
 import io
+import json
 import os
+import re
+import time
 import zipfile
 
 HOST = "files.emumovies.com"
+# quality priority is HIGHEST first (user rule): HD, then HQ, then SQ
 VIDEO_ROOTS = [
+    "Official/Video Snaps (HD)",
     "Official/Video Snaps (HQ)",
     "Official/Video Snaps (SQ)",
-    "Official/Video Snaps (HD)",
 ]
 ARTWORK_ROOT = "Official/Artwork"
+
+
+# ---------- system-name -> folder resolution (user-reported: Dreamcast
+# found nothing although "Sega Dreamcast (Video Snaps)(HQ)" exists - the
+# vendor prefix broke both the prefix and the fuzzy match) ----------
+def _nrm(s):
+    return re.sub(r"[^a-z0-9 ]", " ", s.lower()).strip()
+
+
+def _toks(s):
+    return set(_nrm(s).split())
+
+
+def resolve_name(system, names):
+    """Match a HyperSpin system name to an EmuMovies folder name.
+    Token-based so vendor prefixes don't matter (Dreamcast <-> Sega
+    Dreamcast, MAME <-> MAME Arcade) and NES can never match SNES."""
+    base = {n: n.split(" (")[0] for n in names}
+    st = _toks(system)
+    if not st:
+        return None
+    for n, b in base.items():                      # exact base name
+        if _nrm(b) == _nrm(system):
+            return n
+    best, extra = None, 99                          # folder ⊇ system tokens
+    for n, b in base.items():
+        bt = _toks(b)
+        if st <= bt and len(bt - st) < extra:
+            best, extra = n, len(bt - st)
+    if best:
+        return best
+    for n, b in base.items():                       # system ⊇ folder tokens
+        bt = _toks(b)
+        if bt and bt <= st:
+            return n
+    close = difflib.get_close_matches(
+        _nrm(system), [_nrm(b) for b in base.values()], n=1, cutoff=0.8)
+    if close:
+        for n, b in base.items():
+            if _nrm(b) == close[0]:
+                return n
+    return None
+
+
+# ---------- trainable folder map + full-tree cache ----------
+# data\emumovies_map.json remembers every resolved system -> folder pair
+# (and can be hand-edited to "train" the software); the full FTP tree is
+# saved to data\emumovies_tree.json for inspection and DB indexing.
+def _map_path():
+    from . import config
+    return os.path.join(config.DATA_DIR, "emumovies_map.json")
+
+
+def load_map() -> dict:
+    try:
+        with open(_map_path(), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_map(m: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_map_path()), exist_ok=True)
+        with open(_map_path() + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(m, f, indent=1)
+        os.replace(_map_path() + ".tmp", _map_path())
+    except Exception:
+        pass
 
 
 class EmuMovies:
@@ -24,14 +97,17 @@ class EmuMovies:
         # opportunistic TLS (OWASP transport security): try FTPS with
         # protected data channel first; fall back to plain FTP only when
         # the server refuses, and say so
+        # latin-1: EmuMovies has legacy cp1252 filenames (0x86 etc.) that
+        # crash ftplib's default utf-8 listing decode; latin-1 is a
+        # lossless byte mapping so names round-trip for RETR too
         try:
-            ftps = ftplib.FTP_TLS(HOST, timeout=30)
+            ftps = ftplib.FTP_TLS(HOST, timeout=30, encoding="latin-1")
             ftps.login(user, password)
             ftps.prot_p()
             self.ftp = ftps
             log("  EmuMovies: connected over FTPS (encrypted)")
         except Exception:
-            self.ftp = ftplib.FTP(HOST, timeout=30)
+            self.ftp = ftplib.FTP(HOST, timeout=30, encoding="latin-1")
             self.ftp.login(user, password)
             log("  EmuMovies: connected over plain FTP (server does not "
                 "offer TLS - credentials/content are unencrypted)")
@@ -55,21 +131,38 @@ class EmuMovies:
         return out
 
     # ---------- videos ----------
+    def find_video_dirs(self, system):
+        """ALL matching snap folders, highest quality first (HD sets are
+        often WIP/incomplete - a game missing there must fall through to
+        HQ, then SQ)."""
+        out = []
+        for root in VIDEO_ROOTS:
+            entries = self.listdir(root)
+            hit = resolve_name(system, entries) if entries else None
+            if hit:
+                out.append(f"{root}/{hit}")
+        return out
+
     def find_video_dir(self, system):
-        """Locate the system's video-snap folder (HQ preferred)."""
+        """Locate the system's video-snap folder (HQ preferred). The
+        trained map wins; otherwise vendor-tolerant token resolution
+        (Dreamcast -> 'Sega Dreamcast (Video Snaps)(HQ)'), remembered in
+        the map for next time."""
+        m = load_map()
+        key = f"video::{system}"
+        if m.get(key):
+            root, _, folder = m[key].rpartition("/")
+            if folder in self.listdir(root):
+                return m[key]
         for root in VIDEO_ROOTS:
             entries = self.listdir(root)
             if not entries:
                 continue
-            # exact-prefix first, then fuzzy against the folder names
-            cands = [e for e in entries if e.lower().startswith(system.lower())]
-            if not cands:
-                cands = difflib.get_close_matches(
-                    system, [e.split(" (")[0] for e in entries], n=1, cutoff=0.85)
-                cands = [e for e in entries
-                         if cands and e.split(" (")[0] == cands[0]]
-            if cands:
-                return f"{root}/{cands[0]}"
+            hit = resolve_name(system, entries)
+            if hit:
+                m[key] = f"{root}/{hit}"
+                save_map(m)
+                return m[key]
         return None
 
     def list_videos(self, video_dir):
@@ -93,19 +186,22 @@ class EmuMovies:
 
     # ---------- wheels (logo packs) ----------
     def find_logo_pack(self, system):
+        m = load_map()
+        key = f"logopack::{system}"
+        if m.get(key):
+            return m[key]
         entries = self.listdir(ARTWORK_ROOT)
-        cands = [e for e in entries if e.lower().startswith(system.lower())]
-        if not cands:
-            close = difflib.get_close_matches(system, entries, n=1, cutoff=0.85)
-            cands = close
-        if not cands:
+        hit = resolve_name(system, entries)
+        if not hit:
             return None
-        sysdir = f"{ARTWORK_ROOT}/{cands[0]}"
+        sysdir = f"{ARTWORK_ROOT}/{hit}"
         packs = [f for f in self.listdir(sysdir)
                  if "logo" in f.lower() and f.lower().endswith((".zip",))]
         if not packs:
             return None
-        return f"{sysdir}/{packs[0]}"
+        m[key] = f"{sysdir}/{packs[0]}"
+        save_map(m)
+        return m[key]
 
     def fetch_logo_pack(self, pack_path, cache_dir):
         """Download (once) and open the logos zip; returns ZipFile or None.
