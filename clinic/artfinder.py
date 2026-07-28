@@ -279,6 +279,7 @@ def _ffmpeg():
 # gameplay (user rule: original gameplay and game music ONLY), baked
 # watermarks
 _BAD_TITLE = re.compile(r"review|reaction|commentary|commentated|let.?s play"
+                        r"|trailer|teaser|commercial|announce"
                         r"|face ?cam|unboxing|top ?10|ranking|versus"
                         r"|comparison|podcast|interview|vlog|reacts"
                         r"|live ?stream|first look|impressions"
@@ -559,8 +560,10 @@ def _snap_transcode(src, dst, log, max_len=60, target_43=False):
 def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
                   system=None):
     """Search-then-pick ladder from the media-pipeline knowledge base:
-    snap-length gameplay, else a 2-minute section of a longplay, else a
-    trailer - every result cropped/cut to a 60s snap by ffmpeg. When
+    gameplay, else a section of a longplay - GAME FOOTAGE ONLY (user
+    rule): no trailers and no unfiltered fallback, and every download
+    skips at least the first minute so the snap never opens on a title
+    screen. Every result is cropped/cut to a 60s snap by ffmpeg. When
     YouTube starts refusing downloads, an escalating COOLDOWN waits the
     block out and retries (user rule)."""
     yt = _ytdlp()
@@ -584,19 +587,24 @@ def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
         log(f"    youtube: searching with system term '{sys_term.strip()}' — "
             f"framing target {'4:3' if target_43 else '16:9 (widescreen)'}")
     ladder = (
-        (f"ytsearch6:{title}{sys_term} gameplay", 45, 420, "gameplay"),
+        # gameplay lower bound 105s: every video must afford the 1-minute
+        # intro skip and still leave a 45s+ snap
+        (f"ytsearch6:{title}{sys_term} gameplay", 105, 420, "gameplay"),
         (f"ytsearch6:{title}{sys_term} longplay", 600, None, "longplay"),
-        (f"ytsearch6:{title}{sys_term} trailer", 45, 300, "trailer"),
+        (f"ytsearch6:{title}{sys_term} no commentary", 105, 600,
+         "gameplay"),
     )
 
     def pick_section(kind, duration):
-        # user rule: long videos skip an EXTRA 2 minutes so the snap
-        # lands past title screens, story and menus
+        # user rule: EVERY video skips at least the first minute so the
+        # snap never opens on a title screen; long videos skip extra
+        # minutes to also clear story scenes and menus
         if kind == "longplay":
             return "*00:03:00-00:05:00"
-        if kind == "gameplay" and duration >= 240:
+        if duration >= 240:
             return "*00:02:00-00:04:00"
-        return None
+        end = min(int(duration), 180)
+        return f"*00:01:00-00:{end // 60:02d}:{end % 60:02d}"
 
     def attempt():
         for query, lo, hi, kind in ladder:
@@ -612,18 +620,10 @@ def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
                                        target_43=target_43)
                 log(f"    youtube: '{pick['title'][:50]}' ({pick['uploader'][:24]}) — {note}")
                 return True
-        # safety net: the old one-shot top result, still post-processed
-        r = subprocess.run(
-            [yt, f"ytsearch1:{title} gameplay",
-             "-f", "mp4[height<=480]/best[height<=480]", "-o", tmp,
-             "--no-playlist", "--quiet", "--no-warnings", "--retries", "3"] + auth,
-            capture_output=True, timeout=420, creationflags=0x08000000)
-        if os.path.isfile(tmp):
-            note = _snap_transcode(tmp, dst_path, log, target_43=target_43)
-            log(f"    youtube: top result — {note}")
-            return True
-        _yt_hint(r.stderr.decode(errors="replace"), log)
-        log(f"    youtube: no result ({r.stderr.decode(errors='replace')[-80:].strip()})")
+        # no unfiltered fallback (user rule): better no video than one
+        # showing anything other than the game itself
+        log("    youtube: no suitable video — filters keep only pure "
+            "gameplay with the system in the title")
         return False
 
     try:
