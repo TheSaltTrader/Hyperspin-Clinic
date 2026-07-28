@@ -154,9 +154,9 @@ def stats_line(cfg, system):
             + shared + missing, False)
 
 
-def clean_system(cfg, system, kinds, log, stop_flag):
+def clean_system(cfg, system, kinds, log, stop_flag, progress=None):
     """Move every orphan of the chosen kinds to a backup folder. Returns
-    the number of files removed."""
+    the number of files removed. progress(done, total) ticks per file."""
     try:
         o = orphans(cfg, system, kinds)
     except OSError as e:
@@ -168,6 +168,8 @@ def clean_system(cfg, system, kinds, log, stop_flag):
             f"are used by OTHER systems (shared folder protection)")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     removed = []
+    total = sum(len(o.get(k, [])) for k in kinds)
+    done = 0
     for kind in kinds:
         names = o.get(kind, [])
         if not names:
@@ -177,6 +179,9 @@ def clean_system(cfg, system, kinds, log, stop_flag):
         for name in names:
             if stop_flag():
                 raise StopRequested()
+            done += 1
+            if progress:
+                progress(done, max(1, total))
             src = os.path.join(folder, name)
             try:
                 os.makedirs(bdir, exist_ok=True)
@@ -242,9 +247,22 @@ def restore_backups(cfg, systems, kinds, log, stop_flag=lambda: False,
     left in the backup). Emptied backup folders are removed. Returns the
     number of files restored."""
     restored_total = 0
+    # pre-count for a per-FILE progress bar (user rule)
+    todo = []
+    for system in systems:
+        folders = _folders(cfg, system)
+        for kind in kinds:
+            cb = os.path.join(folders[kind], "clinic_backups")
+            if not os.path.isdir(cb):
+                continue
+            for stamp in sorted(os.listdir(cb)):
+                bdir = os.path.join(cb, stamp)
+                if stamp.startswith("orphans_") and os.path.isdir(bdir):
+                    todo.append((system, kind, folders[kind], bdir,
+                                 len(os.listdir(bdir))))
+    total_files = sum(t[4] for t in todo) or 1
+    done = 0
     for i, system in enumerate(systems):
-        if progress:
-            progress(i, len(systems), system)
         folders = _folders(cfg, system)
         sys_restored = 0
         for kind in kinds:
@@ -259,6 +277,9 @@ def restore_backups(cfg, systems, kinds, log, stop_flag=lambda: False,
                 for name in sorted(os.listdir(bdir)):
                     if stop_flag():
                         raise StopRequested()
+                    done += 1
+                    if progress:
+                        progress(done, total_files, f"{system} ({kind})")
                     src = os.path.join(bdir, name)
                     dst = os.path.join(folder, name)
                     if not os.path.isfile(src):

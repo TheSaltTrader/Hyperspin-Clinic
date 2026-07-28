@@ -119,61 +119,78 @@ def _track_reverts(cfg, lines, log):
         log(f"  tracked {len(lines)} revert(s) in the database")
 
 
-def revert(cfg, systems, categories, log=print):
-    """Revert the selected categories for the selected systems."""
+def revert(cfg, systems, categories, log=print, progress=None):
+    """Revert the selected categories for the selected systems.
+    progress(done, total, label) ticks per restored item (user rule:
+    a progress bar for every long operation)."""
     systems = set(systems)
     categories = set(categories)
     reverted_raws_art = []
     reverted_raws_ren = []
     count = 0
+    art_todo = [e for e in _art_entries()
+                if e["system"] in systems and f"{e['art']}-added" in categories]
+    ren_todo = [e for e in _ren_entries()
+                if e["system"] in systems
+                and f"rename-{e['target']}" in categories]
+    total = (len(art_todo) + len(ren_todo)
+             + (len(systems) if "xml" in categories else 0)
+             + len(systems) * (("theme-convert" in categories)
+                               + ("videotheme" in categories)))
+    done = 0
+
+    def tick(label):
+        nonlocal done
+        done += 1
+        if progress:
+            progress(done, max(1, total), label)
 
     # -- added art: delete the files we added --
-    for e in _art_entries():
-        cat = f"{e['art']}-added"
-        if e["system"] in systems and cat in categories:
-            if os.path.isfile(e["path"]):
-                try:
-                    os.remove(e["path"])
-                    log(f"[{e['system']}] removed added {e['art']}: "
-                        f"{os.path.basename(e['path'])}")
-                except OSError as err:
-                    log(f"[{e['system']}] could not remove {e['path']}: {err}")
-                    continue
-            else:
-                log(f"[{e['system']}] already gone: {os.path.basename(e['path'])}")
-            reverted_raws_art.append(e["raw"])
-            count += 1
+    for e in art_todo:
+        tick(e["game"])
+        if os.path.isfile(e["path"]):
+            try:
+                os.remove(e["path"])
+                log(f"[{e['system']}] removed added {e['art']}: "
+                    f"{os.path.basename(e['path'])}")
+            except OSError as err:
+                log(f"[{e['system']}] could not remove {e['path']}: {err}")
+                continue
+        else:
+            log(f"[{e['system']}] already gone: {os.path.basename(e['path'])}")
+        reverted_raws_art.append(e["raw"])
+        count += 1
 
     # -- renames: restore original-named file from the rename backup --
-    for e in _ren_entries():
-        cat = f"rename-{e['target']}"
-        if e["system"] in systems and cat in categories:
-            folder = e["folder"]
-            newp = os.path.join(folder, e["new"])
-            bdir = os.path.join(folder, "clinic_backups")
-            src = None
-            if os.path.isdir(bdir):
-                for stamp in sorted(os.listdir(bdir)):
-                    c = os.path.join(bdir, stamp, e["old"])
-                    if os.path.isfile(c):
-                        src = c
-                        break
-            if not src:
-                log(f"[{e['system']}] no backup found for '{e['old']}' — skipped")
-                continue
-            try:
-                shutil.copy2(src, os.path.join(folder, e["old"]))
-                if os.path.isfile(newp):
-                    os.remove(newp)
-                log(f"[{e['system']}] restored '{e['old']}' (removed '{e['new']}')")
-                reverted_raws_ren.append(e["raw"])
-                count += 1
-            except OSError as err:
-                log(f"[{e['system']}] revert failed for '{e['old']}': {err}")
+    for e in ren_todo:
+        tick(e["old"])
+        folder = e["folder"]
+        newp = os.path.join(folder, e["new"])
+        bdir = os.path.join(folder, "clinic_backups")
+        src = None
+        if os.path.isdir(bdir):
+            for stamp in sorted(os.listdir(bdir)):
+                c = os.path.join(bdir, stamp, e["old"])
+                if os.path.isfile(c):
+                    src = c
+                    break
+        if not src:
+            log(f"[{e['system']}] no backup found for '{e['old']}' — skipped")
+            continue
+        try:
+            shutil.copy2(src, os.path.join(folder, e["old"]))
+            if os.path.isfile(newp):
+                os.remove(newp)
+            log(f"[{e['system']}] restored '{e['old']}' (removed '{e['new']}')")
+            reverted_raws_ren.append(e["raw"])
+            count += 1
+        except OSError as err:
+            log(f"[{e['system']}] revert failed for '{e['old']}': {err}")
 
     # -- xml: restore the earliest (original) backup --
     if "xml" in categories:
         for system in systems:
+            tick(f"{system} XML")
             baks = _xml_backups(cfg, system)
             if not baks:
                 continue
@@ -198,6 +215,7 @@ def revert(cfg, systems, categories, log=print):
     from . import themesuite
     for system in systems:
         if "theme-convert" in categories:
+            tick(f"{system} themes")
             try:
                 n = themesuite.revert_theme_conversion(cfg, system, log)
                 if n:
@@ -206,6 +224,7 @@ def revert(cfg, systems, categories, log=print):
             except Exception as err:
                 log(f"[{system}] theme revert failed: {err}")
         if "videotheme" in categories:
+            tick(f"{system} video themes")
             try:
                 n = themesuite.revert_videothemes(cfg, system, log)
                 if n:

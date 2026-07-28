@@ -349,7 +349,7 @@ class ClinicApp(tk.Tk):
         self.tab_ask = ttk.Frame(self.nb)
         self.nb.add(self.tab_ask, text="Ask AI")
         self._build_ask(self.tab_ask)
-        self.nb.add(self.tab_revert, text="Revert")
+        self.nb.add(self.tab_revert, text="Restore Backups")
         self._build_revert(self.tab_revert)
         self.tab_help = ttk.Frame(self.nb)
         self.nb.add(self.tab_help, text="Help")
@@ -1011,11 +1011,11 @@ class ClinicApp(tk.Tk):
         n_sel = len(selected)
         self.pb_clear.configure(maximum=n_sel * 100, value=0)
 
-        def status(idx, msg):
+        def status(frac, msg):
             self.after(0, lambda: (
-                self.pb_clear.configure(value=idx * 100),
+                self.pb_clear.configure(value=frac * 100),
                 self.lbl_clear_status.configure(
-                    text=f"{round(idx / n_sel * 100)}% — {msg}")))
+                    text=f"{round(frac / n_sel * 100)}% — {msg}")))
 
         def worker():
             total = 0
@@ -1029,7 +1029,9 @@ class ClinicApp(tk.Tk):
                     status(i, s_name)
                     total += cleaner.clean_system(
                         cfg, s_name, kinds, self._clear_log,
-                        stop_flag=lambda: self._clear_stop)
+                        stop_flag=lambda: self._clear_stop,
+                        progress=lambda d, t, i=i, s=s_name:
+                            status(i + d / t, s))
             except cleaner.StopRequested:
                 stopped = True
                 self._clear_log("— stopped by user —")
@@ -1519,7 +1521,7 @@ class ClinicApp(tk.Tk):
     def _build_revert(self, tab):
         from clinic import reverter
         pad = {"padx": 16}
-        ttk.Label(tab, text="Revert", style="H.TLabel").pack(anchor="w", pady=(14, 2), **pad)
+        ttk.Label(tab, text="Restore Backups", style="H.TLabel").pack(anchor="w", pady=(14, 2), **pad)
         ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
             "Every system where the Clinic made changes, reconstructed from "
             "the backups and the database logs. Pick what to bring back to "
@@ -1682,27 +1684,34 @@ class ClinicApp(tk.Tk):
         cats = [k for k, v in self.rv_cats.items() if v.get()]
         if not systems or not cats:
             messagebox.showinfo(
-                "Revert", "Pick at least one category AND checkmark at least "
+                "Restore Backups", "Pick at least one category AND checkmark at least "
                 "one system to revert.")
             return
         labels = ", ".join(reverter.CATEGORIES[c] for c in cats)
         if not messagebox.askyesno(
-                "Revert", f"Bring back the ORIGINAL versions?\n\n"
+                "Restore Backups", f"Bring back the ORIGINAL versions?\n\n"
                 f"Systems: {', '.join(systems)}\nWhat: {labels}"):
             return
         self.btn_revert.configure(state="disabled")
-        self.lbl_rv_status.configure(text="reverting…")
+        self.lbl_rv_status.configure(text="restoring…")
+
+        def progress(done, total, label):
+            self.after(0, lambda: (
+                self.pb_rv.configure(maximum=total * 100, value=done * 100),
+                self.lbl_rv_status.configure(
+                    text=f"{round(done / total * 100)}% — {label[:40]}")))
 
         def run():
             try:
                 n = reverter.revert(self.cfg, systems, cats,
-                                    log=lambda m: self.after(0, self._rv_logline, m))
+                                    log=lambda m: self.after(0, self._rv_logline, m),
+                                    progress=progress)
                 self.after(0, lambda: (
                     self.lbl_rv_status.configure(text=f"reverted {n} change(s)"),
                     self._rv_refresh()))
             except Exception as e:
                 msg = str(e)
-                self.after(0, lambda m=msg: messagebox.showerror("Revert", m))
+                self.after(0, lambda m=msg: messagebox.showerror("Restore Backups", m))
             finally:
                 self.after(0, lambda: self.btn_revert.configure(state="normal"))
 

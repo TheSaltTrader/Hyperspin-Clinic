@@ -119,7 +119,7 @@ whole collection; use *All* to select everything). Every tab's system
 list is **sortable**: by name (A→Z default, or Z→A) or by the analysis
 line's missing count (asc/desc — *Missing desc* surfaces the systems
 needing the most work). Re-sorting preserves your selections; the
-Revert tab sorts by name or by change count the same way.
+Restore Backups tab sorts by name or by change count the same way.
 The main menu database is the **single source of truth on every tab**:
 a system folder that exists on disk but is not listed there is never
 shown or touched. Press **Start enrichment** and, for each checked system:
@@ -319,7 +319,7 @@ the model knows your setup even before anything is indexed. Each answer
 shows how many chunks were used, their sources, and the question's
 dollar cost. The last 6 turns carry over as conversation context.
 
-### Revert (implemented)
+### Restore Backups (implemented)
 Lists every system where the Clinic made changes (rebuilt from backups
 and the database logs) with a category filter: XML metadata, added
 wheels, added videos, renamed videos / wheel art / roms, **converted
