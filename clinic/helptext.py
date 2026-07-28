@@ -116,9 +116,12 @@ Sources are tried in the knowledge base's order:
  2. EMUMOVIES — video snaps and the system's Logos pack for wheels
     (downloaded once, cached). Quality is HIGHEST-FIRST per game:
     HD → HQ → SQ (HD sets are often works-in-progress, so a game
-    missing there automatically falls back to HQ/SQ). System names
-    are matched vendor-tolerantly ("Dreamcast" finds "Sega Dreamcast
-    (Video Snaps)(HD)"), every resolved location is REMEMBERED in
+    missing there automatically falls back to HQ/SQ), then the Video
+    Themes trees — some systems (NesicaXlive) exist ONLY there.
+    System names are matched through a ladder: your trained map →
+    vendor-tolerant name matching with known aliases (Capcom Play
+    System II = Capcom CPS-2) → semantic search of the indexed folder
+    tree. Every resolved location is REMEMBERED in
     data\\emumovies_map.json (hand-editable to train the software).
     The FULL CATALOG — every folder AND every file in it — is
     extracted to data\\emumovies_catalog.json (weekly, or the
@@ -139,13 +142,20 @@ Sources are tried in the knowledge base's order:
     BOTH the game name AND the system (user rule). Reviews, reactions
     and commentary-over-gameplay are rejected — only original
     gameplay/game music — and known clean longplay channels are
-    preferred. The result is then processed with FFMPEG (bundled with
-    the Theme Suite): black side bars cropped; for 4:3 systems
-    (everything that is not a widescreen platform like PS3/360/PSP/PC)
-    the output is a TRUE 4:3 — bars cropped to 4:3, or a bar-less
-    stretched widescreen source is resized back to 4:3; vertical
-    arcade content keeps its native shape. Cut to a 60-second snap
-    with fade in/out, normalized to H.264. If downloads fail with "sign in to confirm" or "the page
+    preferred; trailers/teasers are rejected and EVERY download skips
+    at least the first minute so snaps never open on a title screen.
+    The result is then processed with FFMPEG (bundled with the Theme
+    Suite): black side bars cropped; the target shape comes from the
+    ASPECT KNOWLEDGE BASE (data\\aspect_db.json, hand-editable) — 4:3
+    systems (everything before ~2000) get a TRUE 4:3 (bars cropped, or
+    a stretched widescreen source resized back), widescreen platforms
+    (PS3/360/PSP/PC) stay 16:9, and MIXED post-2000 arcade systems
+    (NesicaXlive, Taito Type X, Lindbergh…) are decided PER GAME:
+    trained entry → pre-2000 year = 4:3 → otherwise the video's own
+    bar-cropped content decides, and the verdict is saved back per
+    game so the database learns. Vertical arcade content keeps its
+    native shape. Cut to a 60-second snap with fade in/out, normalized
+    to H.264. If downloads fail with "sign in to confirm" or "the page
     needs to be reloaded", UPDATE yt-dlp and/or configure YouTube
     sign-in on the Setup tab.
     YT-DLP UPDATES: at every startup the app checks for a new yt-dlp

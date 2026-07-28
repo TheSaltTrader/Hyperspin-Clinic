@@ -191,7 +191,15 @@ def build(cfg, emu, log, stop_flag=None) -> "dict | None":
 
 def ensure(cfg, emu, log, stop_flag=None) -> "dict | None":
     if fresh():
-        return load()
+        cat = load()
+        # a catalog written before new roots were added (e.g. the Video
+        # Themes trees) must be re-crawled or those systems stay
+        # invisible (user-reported: NesicaXlive)
+        if cat and all(r in cat.get("video", {})
+                       for r in emu_mod.VIDEO_ROOTS):
+            return cat
+        log("  catalog: new video roots were added since the last crawl "
+            "— rebuilding…")
     return build(cfg, emu, log, stop_flag)
 
 
