@@ -698,7 +698,13 @@ def missing_counts(cfg, system):
             parent, pstems = _parent_video_cover(cfg, system, games)
             if parent:
                 present |= pstems
-        out.append(sum(1 for g in games if g.name.lower() not in present))
+        # clone rule (user): a clone's video IS the parent rom's video,
+        # so an available parent video means the clone is not missing
+        out.append(sum(
+            1 for g in games
+            if g.name.lower() not in present
+            and not (kind == "video" and g.cloneof
+                     and g.cloneof.lower() in present)))
     # missing roms are NOT listed anywhere (user rule) - the rom slot
     # stays None; RocketLauncher paths are still used by the Rename tab
     return (len(games), out[0], out[1], None)
@@ -766,25 +772,53 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                 for f in os.listdir(folder):
                     if f.lower().endswith(exts):
                         pool[norm(f)] = f
+                # user rule: the alias search extends to the parent MAME
+                # Video folder, and clones share the parent rom's video
+                # (<cloneof> in the XML) - a match found there is COPIED
+                # over under THIS system's rom name
+                ppool, pfolder = {}, None
+                if art == "video" and parent:
+                    pfolder = media_paths(cfg, parent)["video"]
+                    if os.path.isdir(pfolder):
+                        for f in os.listdir(pfolder):
+                            if f.lower().endswith(exts):
+                                ppool[norm(f)] = f
                 still = []
                 for g in missing:
                     check_stop()
+                    src_dir, via = folder, "local alias"
                     src = (best_match(g.name, pool)
                            or (best_match(g.description, pool)
-                               if g.description else None))
+                               if g.description else None)
+                           or (pool.get(norm(g.cloneof))
+                               if g.cloneof else None))
+                    if not src and ppool:
+                        src = (best_match(g.name, ppool)
+                               or (best_match(g.description, ppool)
+                                   if g.description else None)
+                               or (ppool.get(norm(g.cloneof))
+                                   if g.cloneof else None))
+                        if src:
+                            src_dir, via = pfolder, f"{parent} folder"
                     # skip only when the found file IS the canonical name
-                    # (normalized equality is how aliases are found, so it
-                    # must NOT disqualify them)
+                    # in this system's own folder (normalized equality is
+                    # how aliases are found, so it must NOT disqualify)
                     if (src and safe_name(g.name)
-                            and os.path.splitext(src)[0].lower() != g.name.lower()):
+                            and (src_dir != folder
+                                 or os.path.splitext(src)[0].lower()
+                                 != g.name.lower())):
                         ext = os.path.splitext(src)[1]
                         dst = os.path.join(folder, g.name + ext)
                         if not os.path.exists(dst):
-                            shutil.copy2(os.path.join(folder, src), dst)
+                            shutil.copy2(os.path.join(src_dir, src), dst)
                             added.append({"system": system, "game": g.name,
-                                          "art": art, "source": f"local alias: {src}",
+                                          "art": art,
+                                          "source": f"{via}: {src}",
                                           "path": dst})
-                            log(f"  + {g.name} {art} from local alias '{src}'")
+                            log(f"  + {g.name} {art} copied from {via} "
+                                f"'{src}'")
+                            if art == "video":
+                                purge_video_placeholders(folder, g.name, log)
                             continue
                     still.append(g)
                 missing = still

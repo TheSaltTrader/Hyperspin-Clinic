@@ -107,12 +107,16 @@ Finds missing wheel art and videos for the systems you tick (nothing
 is pre-selected). Before a VIDEO counts as missing, the parent MAME
 system's folder is checked too — subset wheels use it as a fallback,
 so a video available there is not missing and is never re-downloaded
-(the log shows "N covered by the MAME folder fallback").
+(the log shows "N covered by the MAME folder fallback"). CLONES count
+too: a clone's video IS its parent rom's video (<cloneof> in the XML),
+so an available parent video means the clone is not missing.
 Sources are tried in the knowledge base's order:
  1. LOCAL FIRST — alias-named files already in the system's own folders
-    (case / punctuation / region variants, roman numerals). Aliases are
-    COPIED to the canonical rom name; nothing is ever renamed or
-    swapped here.
+    (case / punctuation / region variants, roman numerals). For videos
+    the search EXTENDS to the parent MAME folder, including the clone →
+    parent-rom link: a match found there is COPIED into this system's
+    folder under this system's rom name. Aliases are always COPIED to
+    the canonical rom name; nothing is ever renamed or swapped here.
  2. EMUMOVIES — video snaps and the system's Logos pack for wheels
     (downloaded once, cached). Quality is HIGHEST-FIRST per game:
     HD → HQ → SQ (HD sets are often works-in-progress, so a game
