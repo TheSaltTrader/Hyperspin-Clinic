@@ -195,17 +195,67 @@ def ensure(cfg, emu, log, stop_flag=None) -> "dict | None":
     return build(cfg, emu, log, stop_flag)
 
 
-def video_pools(cat, system):
+def semantic_folder(cfg, system):
+    """Vector-database fallback (user rule): the whole folder tree is in
+    the index, so a system whose name shares no tokens with its EmuMovies
+    folder can still be matched semantically. A candidate only wins when
+    its model NUMBERING agrees (CPS-2 can never serve Capcom Play System
+    III) and it is close enough to trust. Returns (root, folder) or
+    None; never raises."""
+    try:
+        col = store.collection(cfg)
+        res = col.query(
+            query_texts=[f"video snaps folder of the game system {system}"],
+            n_results=8, where={"kind": "emumovies_catalog"})
+    except Exception:
+        return None
+    want = emu_mod._numbers(system)
+    cands = []
+    for i in range(len(res["ids"][0])):
+        meta = res["metadatas"][0][i] or {}
+        folder, root = meta.get("folder"), meta.get("root")
+        if not folder or root not in emu_mod.VIDEO_ROOTS:
+            continue
+        if emu_mod._numbers(folder.split(" (")[0]) != want:
+            continue
+        dist = (res["distances"][0][i]
+                if res.get("distances") else 1.0)
+        cands.append((dist, emu_mod.VIDEO_ROOTS.index(root), root, folder))
+    if not cands:
+        return None
+    cands.sort()
+    dist, _q, root, folder = cands[0]
+    return (root, folder) if dist <= 0.55 else None
+
+
+def video_pools(cat, system, cfg=None):
     """[(vdir, [files])] for the system, highest quality first, straight
-    from the catalog — zero FTP round-trips, zero assumptions."""
+    from the catalog — zero FTP round-trips, zero assumptions. Ladder
+    (user rule): trained map -> token matcher (+known aliases) ->
+    semantic search of the indexed folder tree; a semantic hit is saved
+    to the trainable map so a wrong guess can be corrected by hand."""
     out = []
     if not cat:
         return out
+    trained = emu_mod.load_map().get(f"video::{system}") or []
+    if isinstance(trained, str):
+        trained = [trained]
+    trained = {t.rsplit("/", 1)[-1] for t in trained}
     for root in emu_mod.VIDEO_ROOTS:
         folders = cat.get("video", {}).get(root, {})
-        hit = emu_mod.resolve_name(system, list(folders))
+        hit = next((t for t in trained if t in folders), None)
+        if not hit:
+            hit = emu_mod.resolve_name(system, list(folders))
         if hit:
             out.append((f"{root}/{hit}", folders[hit]))
+    if not out and cfg is not None:
+        sem = semantic_folder(cfg, system)
+        if sem:
+            root, folder = sem
+            out.append((f"{root}/{folder}", cat["video"][root][folder]))
+            m = emu_mod.load_map()
+            m[f"video::{system}"] = folder
+            emu_mod.save_map(m)
     return out
 
 
