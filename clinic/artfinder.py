@@ -871,17 +871,34 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
                     log(f"    download failed for {g.name}: {e}")
             out.append(g)
         return out
-    # wheels via the Logos pack
+    # wheels via the Logos pack (user rule: say what the zip contains -
+    # verification and match counts must be visible in the log)
     pack = emu.find_logo_pack(system)
     if not pack:
         log(f"[{system}] EmuMovies: no Logos pack found")
         return still
+    log(f"[{system}] EmuMovies: Logos pack located — "
+        f"'{os.path.basename(pack)}'")
     zf = emu.fetch_logo_pack(pack, os.path.join(config.DATA_DIR, "emumovies_cache"))
     if not zf:
+        log(f"[{system}] EmuMovies: pack could not be opened — skipping "
+            f"this source")
         return still
-    pool = {norm(n): n for n in zf.namelist()
+    entries = zf.namelist()
+    pool = {norm(n): n for n in entries
             if n.lower().endswith((".png", ".jpg"))}
+    log(f"[{system}] EmuMovies: pack verified — {len(pool)} logo "
+        f"image(s) inside ({len(entries)} entr{'y' if len(entries) == 1 else 'ies'} total)")
+    if not pool:
+        log(f"[{system}] EmuMovies: the pack contains no usable png/jpg "
+            f"logos — nothing to match")
+        try:
+            zf.close()
+        except Exception:
+            pass
+        return still
     out = []
+    matched = 0
     for g in still:
         check_stop()
         src = (best_match(g.name, pool)
@@ -895,10 +912,17 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
                               "source": f"emumovies pack: {os.path.basename(src)}",
                               "path": dst})
                 log(f"  + {g.name} wheel from EmuMovies (curated {dims}, x0.75 squeeze)")
+                matched += 1
                 continue
             except Exception as e:
                 log(f"    wheel extract failed for {g.name}: {e}")
         out.append(g)
+    if matched:
+        log(f"[{system}] EmuMovies pack: {matched} wheel(s) identified "
+            f"and added, {len(out)} still missing")
+    else:
+        log(f"[{system}] EmuMovies pack: NO matching wheels identified "
+            f"for the {len(still)} missing game(s)")
     try:
         zf.close()
     except Exception:

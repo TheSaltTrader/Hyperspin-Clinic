@@ -260,6 +260,11 @@ class EmuMovies:
         if not os.path.isfile(local):
             self.log(f"  downloading logo pack {os.path.basename(pack_path)}…")
             self.download(pack_path, local)
+            self.log(f"  pack downloaded ({os.path.getsize(local) // 1024} KB) "
+                     f"— verifying zip…")
+        else:
+            self.log(f"  using cached pack ({os.path.getsize(local) // 1024} KB, "
+                     f"data\\emumovies_cache) — verifying zip…")
         try:
             return zipfile.ZipFile(local)
         except zipfile.BadZipFile:
