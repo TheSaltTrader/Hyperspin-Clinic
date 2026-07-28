@@ -6,6 +6,7 @@
 # surgically (per-tag regex edits on the original text - never a full
 # XML-parser rewrite, which would reformat or crash). A timestamped backup
 # is taken before the first write to each file.
+import html as _html
 import os
 import re
 import shutil
@@ -104,7 +105,7 @@ def list_systems(hyperspin_root: str) -> list:
         return []
     out = []
     for s in systems:
-        s = s.strip()
+        s = _html.unescape(s.strip())
         if _safe_system(s) and s not in out:
             out.append(s)
     return out
@@ -128,6 +129,11 @@ _TAG = r"<{t}>\s*(.*?)\s*</{t}>"
 
 
 def parse_games(xml_text: str) -> list:
+    # names/descriptions are UNESCAPED here (&apos; -> ', &amp; -> &):
+    # files on disk use the real characters, and comparing escaped XML
+    # names against them wrongly flagged art as missing/extra (user
+    # report: 42 Dreamcast games' art deleted as 'not in the XML').
+    # apply_updates() unescapes its raw-attribute lookups to match.
     games = []
     for m in re.finditer(r"<game\b[^>]*/>|<game\b[^>]*>.*?</game>", xml_text, re.S):
         block = m.group(0)
@@ -136,9 +142,9 @@ def parse_games(xml_text: str) -> list:
             continue
         def tag(t):
             mm = re.search(_TAG.format(t=t), block, re.S | re.I)
-            return (mm.group(1).strip() if mm else "")
+            return _html.unescape(mm.group(1).strip()) if mm else ""
         games.append(Game(
-            name=nm.group(1),
+            name=_html.unescape(nm.group(1)),
             description=tag("description"),
             year=tag("year"),
             manufacturer=tag("manufacturer"),
@@ -183,7 +189,8 @@ def apply_updates(xml_path: str, updates: dict, only_fill_empty=True,
     for m in re.finditer(r"<game\b[^>]*/>|<game\b[^>]*>.*?</game>", text, re.S):
         block = m.group(0)
         nm = re.search(r'name\s*=\s*"([^"]*)"', block)
-        upd = updates.get(nm.group(1)) if nm else None
+        # updates keys are UNESCAPED (parse_games) - unescape the raw attr
+        upd = updates.get(_html.unescape(nm.group(1))) if nm else None
         if upd:
             new_block = block
             for tag_name in ("genre", "manufacturer", "year"):

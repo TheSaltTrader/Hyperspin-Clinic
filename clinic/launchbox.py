@@ -31,9 +31,9 @@ def clean_title(name: str) -> str:
     """Strip region tags and fold 'X, The' articles — the exact cleanup
     the knowledge base validated across four systems. MAME-style dual
     names ('Demon Front / Moyu Zhanxian') keep the primary title."""
-    s = re.sub(r"\([^)]*\)", "", name)
+    s = re.sub(r"\([^)]*\)", "", _html.unescape(name))
     s = re.sub(r"\[[^\]]*\]", "", s)
-    s = s.replace("&amp;", "&").strip(" -")
+    s = s.strip(" -")
     if " / " in s:
         s = s.split(" / ")[0]
     m = re.match(rf"^(.*),\s*({_ART})\s+-\s+(.*)$", s)
