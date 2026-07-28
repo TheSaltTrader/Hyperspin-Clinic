@@ -151,6 +151,20 @@ horizontal ×0.75 squeeze (16:9 display convention), resized to 400 px
 wide. Every addition is logged (data\\art_additions.log), tracked in
 the database, and shown in the log pane with live status/percentage.
 
+━━━ CLEAR EXTRAS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Finds art files that are NOT part of a system's database XML — extra
+wheels, videos and themes left behind by removed games. The system
+list works like every other tab (nothing pre-selected, sortable by
+name or by the number of extra files) and each system's line shows
+how many extras exist per art type. Pick the art types (Wheel art /
+Videos / Themes), press Delete, and confirm the warning: the selected
+art types' files that do not exist in each selected system's XML are
+removed, because the system does not use them. NEVER touched: the
+Themes default.zip and any folders inside the art-type folders.
+Removed files are MOVED to clinic_backups\\orphans_<stamp>\\ inside
+the art folder (restorable by hand), logged to data\\cleanup.log and
+tracked in the database.
+
 ━━━ RENAME ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Matches wrongly-named files to database names — ONE system at a time
 (check exactly one; nothing is pre-selected on this tab). Choose what

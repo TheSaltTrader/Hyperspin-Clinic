@@ -91,9 +91,32 @@ def save_map(m: dict) -> None:
         pass
 
 
+class _ReuseTLS(ftplib.FTP_TLS):
+    """FTP_TLS with TLS session REUSE on data connections - many FTPS
+    servers kill data channels that open a fresh TLS session, which
+    surfaces as 'EOF occurred in violation of protocol' (user report)."""
+
+    def ntransfercmd(self, cmd, rest=None):
+        conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
+        if self._prot_p:
+            try:
+                conn = self.context.wrap_socket(
+                    conn, server_hostname=self.host,
+                    session=self.sock.session)
+            except Exception:
+                conn = self.context.wrap_socket(
+                    conn, server_hostname=self.host)
+        return conn, size
+
+
 class EmuMovies:
     def __init__(self, user, password, log=print):
         self.log = log
+        self._user, self._pass = user, password
+        self._dir_cache = {}
+        self._connect(announce=True)
+
+    def _connect(self, announce=False):
         # opportunistic TLS (OWASP transport security): try FTPS with
         # protected data channel first; fall back to plain FTP only when
         # the server refuses, and say so
@@ -101,17 +124,37 @@ class EmuMovies:
         # crash ftplib's default utf-8 listing decode; latin-1 is a
         # lossless byte mapping so names round-trip for RETR too
         try:
-            ftps = ftplib.FTP_TLS(HOST, timeout=30, encoding="latin-1")
-            ftps.login(user, password)
+            ftps = _ReuseTLS(HOST, timeout=30, encoding="latin-1")
+            ftps.login(self._user, self._pass)
             ftps.prot_p()
             self.ftp = ftps
-            log("  EmuMovies: connected over FTPS (encrypted)")
+            if announce:
+                self.log("  EmuMovies: connected over FTPS (encrypted)")
         except Exception:
             self.ftp = ftplib.FTP(HOST, timeout=30, encoding="latin-1")
-            self.ftp.login(user, password)
-            log("  EmuMovies: connected over plain FTP (server does not "
-                "offer TLS - credentials/content are unencrypted)")
-        self._dir_cache = {}
+            self.ftp.login(self._user, self._pass)
+            if announce:
+                self.log("  EmuMovies: connected over plain FTP (server "
+                         "does not offer TLS - credentials/content are "
+                         "unencrypted)")
+
+    def _retry(self, fn):
+        """Run an FTP operation; on a dropped/foul connection (SSL EOF,
+        reset, timeout) reconnect once and run it again - a dying
+        session must never kill a whole system's art pass."""
+        try:
+            return fn()
+        except ftplib.error_perm:
+            raise
+        except Exception as e:
+            self.log(f"    EmuMovies connection hiccup "
+                     f"({e or type(e).__name__}) — reconnecting…")
+            try:
+                self.ftp.close()
+            except Exception:
+                pass
+            self._connect()
+            return fn()
 
     def close(self):
         try:
@@ -122,11 +165,14 @@ class EmuMovies:
     def listdir(self, path):
         if path in self._dir_cache:
             return self._dir_cache[path]
-        try:
-            names = self.ftp.nlst(path)
-        except ftplib.error_perm:
-            names = []
-        out = [n.rsplit("/", 1)[-1] for n in names]
+
+        def _do():
+            try:
+                names = self.ftp.nlst(path)
+            except ftplib.error_perm:
+                names = []
+            return [n.rsplit("/", 1)[-1] for n in names]
+        out = self._retry(_do)
         self._dir_cache[path] = out
         return out
 
@@ -172,9 +218,12 @@ class EmuMovies:
     def download(self, remote_path, local_path):
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         tmp = local_path + ".part"
-        try:
+
+        def _do():
             with open(tmp, "wb") as f:
                 self.ftp.retrbinary(f"RETR {remote_path}", f.write)
+        try:
+            self._retry(_do)
         except Exception:
             try:
                 os.remove(tmp)

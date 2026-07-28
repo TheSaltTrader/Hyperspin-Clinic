@@ -336,6 +336,9 @@ class ClinicApp(tk.Tk):
         self.tab_art = ttk.Frame(self.nb)
         self.nb.add(self.tab_art, text="Missing Art")
         self._build_art(self.tab_art)
+        self.tab_clear = ttk.Frame(self.nb)
+        self.nb.add(self.tab_clear, text="Clear Extras")
+        self._build_clear(self.tab_clear)
         self.tab_rename = ttk.Frame(self.nb)
         self.nb.add(self.tab_rename, text="Rename")
         self._build_rename(self.tab_rename)
@@ -739,11 +742,13 @@ class ClinicApp(tk.Tk):
             self.sys_list.reload()
         elif idx == 2 and not self.art_list.vars:
             self.art_list.reload()
-        elif idx == 3 and not self.rename_list.vars:
+        elif idx == 3 and not self.clear_list.vars:
+            self.clear_list.reload()
+        elif idx == 4 and not self.rename_list.vars:
             self.rename_list.reload()
-        elif idx == 4 and not self.themes_list.vars:
+        elif idx == 5 and not self.themes_list.vars:
             self.themes_list.reload()
-        elif idx == 6:
+        elif idx == 7:
             self._rv_refresh()
 
     def _load_systems(self):
@@ -759,7 +764,8 @@ class ClinicApp(tk.Tk):
         try:
             while True:
                 tag, msg = self._logq.get_nowait()
-                widget = self.txt_art_log if tag == "art" else self.txt_log
+                widget = {"art": self.txt_art_log,
+                          "cln": self.txt_clear_log}.get(tag, self.txt_log)
                 widget.configure(state="normal")
                 widget.insert("end", msg + "\n")
                 widget.see("end")
@@ -888,6 +894,104 @@ class ClinicApp(tk.Tk):
 
     def _art_log(self, msg):
         self._logq.put(("art", msg))
+
+    # ---------- Clear Extras tab ----------
+    def _build_clear(self, tab):
+        from clinic import cleaner
+        pad = {"padx": 16}
+        ttk.Label(tab, text="Clear Extras", style="H.TLabel").pack(
+            anchor="w", pady=(16, 2), **pad)
+        ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
+            "Finds art files that are NOT part of the system's database "
+            "XML — extra wheels, videos and themes left behind by removed "
+            "games. Delete moves them into clinic_backups\\ inside each "
+            "art folder (restorable). Folders inside the art folders and "
+            "the Themes default.zip are never touched.")
+        ).pack(anchor="w", pady=(0, 8), **pad)
+        self.clear_list = SystemListPanel(
+            tab, height=180, stats_fn=cleaner.stats_line,
+            get_cfg=lambda: self.cfg).bind_root(
+            lambda: self.cfg.get("hyperspin_root", ""))
+        opts = ttk.Frame(tab)
+        opts.pack(fill="x", pady=(8, 2), **pad)
+        self.clear_opts = {
+            "wheel": tk.BooleanVar(value=True),
+            "video": tk.BooleanVar(value=True),
+            "theme": tk.BooleanVar(value=True),
+        }
+        r1 = ttk.Frame(opts)
+        r1.pack(anchor="w")
+        ttk.Label(r1, text="Clear: ", style="Sub.TLabel").pack(side="left")
+        ttk.Checkbutton(r1, text="Wheel art",
+                        variable=self.clear_opts["wheel"]).pack(side="left")
+        ttk.Checkbutton(r1, text="Videos",
+                        variable=self.clear_opts["video"]).pack(side="left", padx=(8, 0))
+        ttk.Checkbutton(r1, text="Themes",
+                        variable=self.clear_opts["theme"]).pack(side="left", padx=(8, 0))
+        run = ttk.Frame(tab)
+        run.pack(fill="x", pady=(6, 4), **pad)
+        self.btn_clear = ttk.Button(run, text="🗑 Delete extras",
+                                    command=self._start_clear)
+        self.btn_clear.pack(side="left")
+        self.btn_clear_stop = ttk.Button(
+            run, text="■ Stop", state="disabled",
+            command=lambda: setattr(self, "_clear_stop", True))
+        self.btn_clear_stop.pack(side="left", padx=(8, 0))
+        self.txt_clear_log = scrolled_log(
+            tab, {"fill": "both", "expand": True, "pady": (4, 12), **pad},
+            height=10, font=("Consolas", 9), wrap="word")
+        self._clear_stop = False
+
+    def _clear_log(self, msg):
+        self._logq.put(("cln", msg))
+
+    def _start_clear(self):
+        from clinic import cleaner
+        selected = self.clear_list.selected()
+        if not selected:
+            messagebox.showinfo("Clear Extras", "No systems selected.")
+            return
+        kinds = [k for k in cleaner.KINDS if self.clear_opts[k].get()]
+        if not kinds:
+            messagebox.showinfo("Clear Extras", "Pick at least one art type.")
+            return
+        pretty = {"wheel": "wheel art", "video": "videos", "theme": "themes"}
+        if not messagebox.askyesno(
+                "Clear Extras — please confirm",
+                f"For the {len(selected)} selected system(s), the selected "
+                f"art types ({', '.join(pretty[k] for k in kinds)}) whose "
+                "files do NOT exist in each system's database XML will be "
+                "REMOVED — they are not used by the system.\n\n"
+                "Never touched: the Themes default.zip and any folders "
+                "inside the art-type folders.\n\n"
+                "Removed files are moved to clinic_backups (restorable). "
+                "Proceed?"):
+            return
+        self._clear_stop = False
+        self.btn_clear.configure(state="disabled")
+        self.btn_clear_stop.configure(state="normal")
+        cfg = dict(self.cfg)
+
+        def worker():
+            total = 0
+            try:
+                for s_name in selected:
+                    if self._clear_stop:
+                        self._clear_log("— stopped by user —")
+                        break
+                    total += cleaner.clean_system(
+                        cfg, s_name, kinds, self._clear_log,
+                        stop_flag=lambda: self._clear_stop)
+            except cleaner.StopRequested:
+                self._clear_log("— stopped by user —")
+            except Exception as e:
+                self._clear_log(f"ERROR: {e}")
+            self._clear_log(f"DONE — {total} file(s) cleared.")
+            self.after(0, lambda: (
+                self.btn_clear.configure(state="normal"),
+                self.btn_clear_stop.configure(state="disabled"),
+                self.clear_list.reload()))
+        threading.Thread(target=worker, daemon=True).start()
 
     def _rebuild_emucat(self):
         """Manual full-catalog refresh (it also refreshes itself weekly

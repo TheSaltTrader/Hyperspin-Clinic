@@ -223,6 +223,18 @@ stretch), normalized to **400 px wide** to match the HyperSpin art set.
 path), and upserted into the vector database + Elasticsearch so changes
 are queryable later.
 
+### Clear Extras (implemented)
+Finds art files **not part of the system's database XML** — extra
+wheels, videos and themes left behind by removed games. Same system
+list as every tab (nothing pre-selected, sortable by name or by the
+number of extra files, per-system analysis line). Select the art types
+(Wheel art / Videos / Themes), press **Delete extras**, confirm the
+warning — the unused files are removed. Never touched: the Themes
+`default.zip` and any folders inside the art-type folders. Removed
+files are moved to `clinic_backups\orphans_<stamp>\` inside each art
+folder (restorable), logged to `data\cleanup.log`, and tracked in the
+database.
+
 ### Rename (implemented)
 System list with **nothing pre-selected** (All / None buttons, like every
 tab). Curation is **one system at a time**: check exactly one system,
