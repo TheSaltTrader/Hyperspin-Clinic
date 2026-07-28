@@ -129,14 +129,18 @@ def inspect_hyperspin(root: str) -> dict:
     for name in systems:
         themes = snaps = 0
         if media:
-            themes_dir = os.path.join(media, name, "Themes")
+            # normalized folder resolution (same rule as every tab):
+            # 'Hyper Neo Geo 64' finds 'Hyperneogeo64'
+            from .artfinder import system_media_base
+            sys_base = system_media_base({"hyperspin_root": game_root}, name)
+            themes_dir = os.path.join(sys_base, "Themes")
             if os.path.isdir(themes_dir):
                 try:
                     themes = sum(1 for f in os.scandir(themes_dir)
                                  if f.name.lower().endswith(".zip"))
                 except OSError:
                     pass
-            video_dir = os.path.join(media, name, "Video")
+            video_dir = os.path.join(sys_base, "Video")
             if os.path.isdir(video_dir):
                 try:
                     snaps = sum(1 for f in os.scandir(video_dir)
