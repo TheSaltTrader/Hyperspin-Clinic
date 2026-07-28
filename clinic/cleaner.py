@@ -27,6 +27,30 @@ class StopRequested(Exception):
     pass
 
 
+# cross-system protection (user rule): the MAME video folder is shared -
+# subset wheels play videos from it. A video may only be removed when NO
+# system in the Main Menu lists a game of that name. Cached per root so
+# the per-system analysis doesn't re-parse hundreds of XMLs each line.
+_names_cache = {"root": None, "ts": 0.0, "names": frozenset()}
+
+
+def all_game_names(cfg) -> frozenset:
+    root = cfg.get("hyperspin_root", "")
+    if (_names_cache["root"] == root
+            and time.time() - _names_cache["ts"] < 120):
+        return _names_cache["names"]
+    names = set()
+    for system in hdb.list_systems(root):
+        try:
+            xml = hdb.system_xml_path(root, system)
+            for g in hdb.parse_games(hdb.read_db_text(xml)[0]):
+                names.add(g.name.lower())
+        except OSError:
+            pass
+    _names_cache.update(root=root, ts=time.time(), names=frozenset(names))
+    return _names_cache["names"]
+
+
 def _folders(cfg, system):
     p = media_paths(cfg, system)
     theme_dir = os.path.join(os.path.dirname(p["video"]), "Themes")
@@ -35,12 +59,16 @@ def _folders(cfg, system):
 
 def orphans(cfg, system, kinds=KINDS):
     """{kind: [filename, ...]} of top-level files whose stem matches no
-    game in the system XML. Raises OSError when the XML is unreadable."""
+    game in the system XML (case-insensitive). VIDEOS are additionally
+    checked against EVERY system in the Main Menu - a video any other
+    system uses (shared MAME folder) is never an orphan; its count goes
+    into out['shared_video']. Raises OSError when the XML is unreadable."""
     xml = hdb.system_xml_path(cfg["hyperspin_root"], system)
     games = hdb.parse_games(hdb.read_db_text(xml)[0])
     valid = {g.name.lower() for g in games}
-    out = {}
+    out = {"shared_video": 0}
     folders = _folders(cfg, system)
+    everywhere = None
     for kind in kinds:
         folder = folders[kind]
         found = []
@@ -53,8 +81,16 @@ def orphans(cfg, system, kinds=KINDS):
                     continue
                 if kind == "theme" and e.name.lower() == "default.zip":
                     continue                    # HyperSpin's fallback theme
-                if stem.lower() not in valid:
-                    found.append(e.name)
+                s = stem.lower()
+                if s in valid:
+                    continue
+                if kind == "video":
+                    if everywhere is None:
+                        everywhere = all_game_names(cfg)
+                    if s in everywhere:
+                        out["shared_video"] += 1
+                        continue                # another system uses it
+                found.append(e.name)
         out[kind] = sorted(found)
     return out
 
@@ -72,12 +108,14 @@ def stats_line(cfg, system):
         parts.append(f"{len(o['video'])} video(s)")
     if o["theme"]:
         parts.append(f"{len(o['theme'])} theme(s)")
+    shared = f" ({o['shared_video']} video(s) shared with other systems, kept)" \
+        if o.get("shared_video") else ""
     if not parts:
-        return "✓ no extra art (everything matches the XML)", True
+        return "✓ no extra art (everything matches the XML)" + shared, True
     total = len(o["wheel"]) + len(o["video"]) + len(o["theme"])
     # total FIRST: it is the numeric key the list's Missing sort uses
-    return (f"⚠ {total} extra file(s) not in the XML: " + ", ".join(parts),
-            False)
+    return (f"⚠ {total} extra file(s) not in the XML: " + ", ".join(parts)
+            + shared, False)
 
 
 def clean_system(cfg, system, kinds, log, stop_flag):
@@ -89,6 +127,9 @@ def clean_system(cfg, system, kinds, log, stop_flag):
         log(f"[{system}] SKIP: {e}")
         return 0
     folders = _folders(cfg, system)
+    if o.get("shared_video"):
+        log(f"[{system}] {o['shared_video']} video(s) kept — their names "
+            f"are used by OTHER systems (shared folder protection)")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     removed = []
     for kind in kinds:
