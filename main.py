@@ -963,6 +963,8 @@ class ClinicApp(tk.Tk):
             run, text="■ Stop", state="disabled",
             command=lambda: setattr(self, "_clear_stop", True))
         self.btn_clear_stop.pack(side="left", padx=(8, 0))
+        ttk.Button(run, text="↩ Restore backups",
+                   command=self._restore_extras_backups).pack(side="left", padx=(8, 0))
         ttk.Button(run, text="🧹 Clear backups",
                    command=self._clear_extras_backups).pack(side="left", padx=(8, 0))
         self.pb_clear = ttk.Progressbar(run, mode="determinate", length=140)
@@ -1048,6 +1050,54 @@ class ClinicApp(tk.Tk):
                         f"{n_sel} system(s).\n\nThey were moved to "
                         "clinic_backups and can be restored by hand — or "
                         "removed for good with the 'Clear backups' button.")
+            self.after(0, finish)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _restore_extras_backups(self):
+        from clinic import cleaner
+        selected = self.clear_list.selected()
+        if not selected:
+            messagebox.showinfo("Restore backups", "No systems selected.")
+            return
+        kinds = [k for k in cleaner.KINDS if self.clear_opts[k].get()]
+        if not kinds:
+            messagebox.showinfo("Restore backups", "Pick at least one art type.")
+            return
+        pretty = {"wheel": "wheel art", "video": "videos", "theme": "themes"}
+        if not messagebox.askyesno(
+                "Restore backups",
+                f"Restore all backed-up {', '.join(pretty[k] for k in kinds)} "
+                f"for {len(selected)} system(s) back into their original "
+                "folders?\n\nFiles that exist again are never overwritten."):
+            return
+        cfg = dict(self.cfg)
+        self.btn_clear.configure(state="disabled")
+
+        def progress(i, total, label):
+            self.after(0, lambda: (
+                self.pb_clear.configure(maximum=max(1, total) * 100,
+                                        value=i * 100),
+                self.lbl_clear_status.configure(
+                    text=f"{round(i / max(1, total) * 100)}% — {label}")))
+
+        def worker():
+            try:
+                n = cleaner.restore_backups(cfg, selected, kinds,
+                                            self._clear_log,
+                                            progress=progress)
+            except Exception as e:
+                self._clear_log(f"ERROR: {e}")
+                n = 0
+
+            def finish():
+                self.pb_clear.configure(value=self.pb_clear["maximum"])
+                self.lbl_clear_status.configure(text="done")
+                self.btn_clear.configure(state="normal")
+                self.clear_list.reload()
+                messagebox.showinfo(
+                    "Restore complete",
+                    f"{n} file(s) were restored to their original folders "
+                    f"across {len(selected)} system(s).")
             self.after(0, finish)
         threading.Thread(target=worker, daemon=True).start()
 

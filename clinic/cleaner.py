@@ -234,6 +234,66 @@ def clear_backups(cfg, log, stop_flag=lambda: False, progress=None):
     return ndirs, nfiles
 
 
+def restore_backups(cfg, systems, kinds, log, stop_flag=lambda: False,
+                    progress=None):
+    """Move every backed-up extra (clinic_backups\\orphans_*) of the
+    selected systems/kinds BACK into its original art folder. A file that
+    already exists again in the folder is never overwritten (logged and
+    left in the backup). Emptied backup folders are removed. Returns the
+    number of files restored."""
+    restored_total = 0
+    for i, system in enumerate(systems):
+        if progress:
+            progress(i, len(systems), system)
+        folders = _folders(cfg, system)
+        sys_restored = 0
+        for kind in kinds:
+            folder = folders[kind]
+            cb = os.path.join(folder, "clinic_backups")
+            if not os.path.isdir(cb):
+                continue
+            for stamp in sorted(os.listdir(cb)):
+                bdir = os.path.join(cb, stamp)
+                if not (stamp.startswith("orphans_") and os.path.isdir(bdir)):
+                    continue
+                for name in sorted(os.listdir(bdir)):
+                    if stop_flag():
+                        raise StopRequested()
+                    src = os.path.join(bdir, name)
+                    dst = os.path.join(folder, name)
+                    if not os.path.isfile(src):
+                        continue
+                    if os.path.exists(dst):
+                        log(f"  = {name} ({kind}) already exists — kept in "
+                            f"the backup, not overwritten")
+                        continue
+                    try:
+                        os.replace(src, dst)
+                        sys_restored += 1
+                        log(f"  + {name} ({kind}) restored from {stamp}")
+                    except OSError as e:
+                        log(f"    could not restore {name}: {e}")
+                if not os.listdir(bdir):
+                    try:
+                        os.rmdir(bdir)
+                    except OSError:
+                        pass
+        if sys_restored:
+            _track_restore(cfg, system, sys_restored, log)
+        log(f"[{system}] {sys_restored} file(s) restored to their original "
+            f"folders")
+        restored_total += sys_restored
+    return restored_total
+
+
+def _track_restore(cfg, system, n, log):
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(os.path.join(config.DATA_DIR, "cleanup.log"), "a",
+              encoding="utf-8") as f:
+        f.write(f"{stamp}\t{system}\tRESTORED\t{n} file(s)\t-\n")
+
+
 def _track(cfg, system, removed, log):
     os.makedirs(config.DATA_DIR, exist_ok=True)
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")

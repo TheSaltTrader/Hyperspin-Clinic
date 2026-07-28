@@ -174,9 +174,12 @@ line means the art folder's name/path does not match.
 Removed files are MOVED to clinic_backups\\orphans_<stamp>\\ inside
 the art folder (restorable by hand), logged to data\\cleanup.log and
 tracked in the database. A progress bar shows the run and a pop-up
-confirms when everything was deleted. The "Clear backups" button
-PERMANENTLY deletes those orphans_* backup folders (red warning
-first — restored-by-hand is then no longer possible).
+confirms when everything was deleted. The "Restore backups" button
+moves the backed-up files of the SELECTED systems (and selected art
+types) back into their original folders — files that exist again are
+never overwritten. The "Clear backups" button PERMANENTLY deletes
+those orphans_* backup folders (red warning first — restoring is
+then no longer possible).
 
 ━━━ RENAME ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Matches wrongly-named files to database names — ONE system at a time
