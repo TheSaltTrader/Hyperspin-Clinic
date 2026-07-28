@@ -230,10 +230,12 @@ list as every tab (nothing pre-selected, sortable by name or by the
 number of extra files, per-system analysis line). Select the art types
 (Wheel art / Videos / Themes), press **Delete extras**, confirm the
 warning — the unused files are removed. Never touched: the Themes
-`default.zip`, any folders inside the art-type folders, and any
-**video whose name any other system's database uses** — the MAME video
-folder is shared by subset wheels, so every system's XML is checked
-before a video may be removed (matching ignores caps). Removed
+`default.zip`, any folders inside the art-type folders, and — in the
+**parent MAME system's folder only** (the one subset wheels fall back
+to) — any video another system lists without holding its own copy.
+Subset wheels' own folders are read by nobody else and get normal
+per-system cleanup; matching ignores caps, and a *"folder not found"*
+note in the analysis line flags art-path mismatches. Removed
 files are moved to `clinic_backups\orphans_<stamp>\` inside each art
 folder (restorable), logged to `data\cleanup.log`, and tracked in the
 database.

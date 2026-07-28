@@ -27,28 +27,53 @@ class StopRequested(Exception):
     pass
 
 
-# cross-system protection (user rule): the MAME video folder is shared -
-# subset wheels play videos from it. A video may only be removed when NO
-# system in the Main Menu lists a game of that name. Cached per root so
-# the per-system analysis doesn't re-parse hundreds of XMLs each line.
-_names_cache = {"root": None, "ts": 0.0, "names": frozenset()}
+# cross-system protection (user rule, refined after the 'MAME 2 Players
+# shows zero extras' report): subset wheels fall back to the PARENT MAME
+# system's video folder - so only the PARENT's folder is shared. A video
+# there may be removed only when every other system that lists the game
+# has its own copy. A subset's own folder is read by nobody else and gets
+# normal per-system cleanup. Cached per session (a TTL that expired while
+# the analysis thread walked ~400 systems made it re-parse every XML over
+# and over - the tab looked stuck at 'analyzing').
+_share_cache = {"root": None, "usage": {}, "parent": None, "vstems": {}}
 
 
-def all_game_names(cfg) -> frozenset:
+def _share_info(cfg):
+    """(usage: name->[systems], parent_system) for the current root."""
     root = cfg.get("hyperspin_root", "")
-    if (_names_cache["root"] == root
-            and time.time() - _names_cache["ts"] < 120):
-        return _names_cache["names"]
-    names = set()
+    if _share_cache["root"] == root:
+        return _share_cache["usage"], _share_cache["parent"]
+    usage, best, best_n = {}, None, 0
     for system in hdb.list_systems(root):
         try:
             xml = hdb.system_xml_path(root, system)
-            for g in hdb.parse_games(hdb.read_db_text(xml)[0]):
-                names.add(g.name.lower())
+            games = hdb.parse_games(hdb.read_db_text(xml)[0])
         except OSError:
-            pass
-    _names_cache.update(root=root, ts=time.time(), names=frozenset(names))
-    return _names_cache["names"]
+            continue
+        for g in games:
+            usage.setdefault(g.name.lower(), []).append(system)
+        if len(games) > best_n:
+            best, best_n = system, len(games)
+    _share_cache.update(root=root, usage=usage, parent=best, vstems={})
+    return usage, best
+
+
+def invalidate_cache():
+    _share_cache["root"] = None
+
+
+def _own_video_stems(cfg, system) -> set:
+    if system not in _share_cache["vstems"]:
+        stems = set()
+        folder = _folders(cfg, system)["video"]
+        if os.path.isdir(folder):
+            for e in os.scandir(folder):
+                if e.is_file():
+                    stem, ext = os.path.splitext(e.name)
+                    if ext.lower() in _EXTS["video"]:
+                        stems.add(stem.lower())
+        _share_cache["vstems"][system] = stems
+    return _share_cache["vstems"][system]
 
 
 def _folders(cfg, system):
@@ -59,20 +84,24 @@ def _folders(cfg, system):
 
 def orphans(cfg, system, kinds=KINDS):
     """{kind: [filename, ...]} of top-level files whose stem matches no
-    game in the system XML (case-insensitive). VIDEOS are additionally
-    checked against EVERY system in the Main Menu - a video any other
-    system uses (shared MAME folder) is never an orphan; its count goes
-    into out['shared_video']. Raises OSError when the XML is unreadable."""
+    game in the system XML (case-insensitive). When SYSTEM IS THE PARENT
+    (the largest system - the folder subset wheels fall back to), a video
+    is additionally protected while any other system lists the game and
+    lacks its own copy; the count goes into out['shared_video'].
+    out['missing_dirs'] lists art folders that do not exist (path
+    diagnosis). Raises OSError when the XML is unreadable."""
     xml = hdb.system_xml_path(cfg["hyperspin_root"], system)
     games = hdb.parse_games(hdb.read_db_text(xml)[0])
     valid = {g.name.lower() for g in games}
-    out = {"shared_video": 0}
+    out = {"shared_video": 0, "missing_dirs": []}
     folders = _folders(cfg, system)
-    everywhere = None
+    usage = parent = None
     for kind in kinds:
         folder = folders[kind]
         found = []
-        if os.path.isdir(folder):
+        if not os.path.isdir(folder):
+            out["missing_dirs"].append(os.path.basename(folder) or kind)
+        else:
             for e in os.scandir(folder):
                 if not e.is_file():
                     continue                    # never touch subfolders
@@ -85,11 +114,15 @@ def orphans(cfg, system, kinds=KINDS):
                 if s in valid:
                     continue
                 if kind == "video":
-                    if everywhere is None:
-                        everywhere = all_game_names(cfg)
-                    if s in everywhere:
-                        out["shared_video"] += 1
-                        continue                # another system uses it
+                    if usage is None:
+                        usage, parent = _share_info(cfg)
+                    if system == parent:
+                        others = [t for t in usage.get(s, ())
+                                  if t != system]
+                        if any(s not in _own_video_stems(cfg, t)
+                               for t in others):
+                            out["shared_video"] += 1
+                            continue            # a fallback user needs it
                 found.append(e.name)
         out[kind] = sorted(found)
     return out
@@ -110,12 +143,15 @@ def stats_line(cfg, system):
         parts.append(f"{len(o['theme'])} theme(s)")
     shared = f" ({o['shared_video']} video(s) shared with other systems, kept)" \
         if o.get("shared_video") else ""
+    missing = f" [folder not found: {', '.join(o['missing_dirs'])}]" \
+        if o.get("missing_dirs") else ""
     if not parts:
-        return "✓ no extra art (everything matches the XML)" + shared, True
+        return ("✓ no extra art (everything matches the XML)" + shared
+                + missing, True)
     total = len(o["wheel"]) + len(o["video"]) + len(o["theme"])
     # total FIRST: it is the numeric key the list's Missing sort uses
     return (f"⚠ {total} extra file(s) not in the XML: " + ", ".join(parts)
-            + shared, False)
+            + shared + missing, False)
 
 
 def clean_system(cfg, system, kinds, log, stop_flag):
@@ -151,6 +187,7 @@ def clean_system(cfg, system, kinds, log, stop_flag):
                 log(f"    could not remove {name}: {e}")
     if removed:
         _track(cfg, system, removed, log)
+        _share_cache["vstems"] = {}     # folder contents changed
     log(f"[{system}] {len(removed)} orphan file(s) removed "
         f"(backed up, restorable)")
     return len(removed)
