@@ -58,11 +58,13 @@ _ROMAN = {" ii": " 2", " iii": " 3", " iv": " 4", " v ": " 5 ", " vi": " 6"}
 
 
 def norm(name: str) -> str:
+    import html as _html
     # strip only KNOWN media extensions - os.path.splitext truncated any
     # name with a dot in it ('Marvel vs. Capcom 2' became 'marvel vs',
     # so its exactly-named snap could never match; same for Dr. Mario)
+    # unescape first: '&apos;' would otherwise pollute the key as 'apos'
     s = re.sub(r"\.(png|jpe?g|gif|bmp|mp4|flv|avi|mkv|webm|zip)$", "",
-               name, flags=re.I).lower()
+               _html.unescape(name), flags=re.I).lower()
     s = re.sub(r"\([^)]*\)|\[[^\]]*\]", "", s)          # strip regions/tags
     for r, a in _ROMAN.items():
         s = s.replace(r, a)
