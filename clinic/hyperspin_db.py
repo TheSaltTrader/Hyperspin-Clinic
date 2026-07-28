@@ -122,6 +122,7 @@ class Game:
     year: str = ""
     manufacturer: str = ""
     genre: str = ""
+    cloneof: str = ""             # parent rom (MAME clones share its video)
     block_span: tuple = field(default=(0, 0))   # char range of the block
 
 
@@ -149,6 +150,7 @@ def parse_games(xml_text: str) -> list:
             year=tag("year"),
             manufacturer=tag("manufacturer"),
             genre=tag("genre"),
+            cloneof=tag("cloneof"),
             block_span=m.span(),
         ))
     return games
