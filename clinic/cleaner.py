@@ -8,6 +8,7 @@
 #     art folder (app rule: every destructive step backs up first),
 #     logged to data\cleanup.log and tracked in the database
 import os
+import re
 import time
 
 from . import config
@@ -27,14 +28,15 @@ class StopRequested(Exception):
     pass
 
 
-# cross-system protection (user rule, refined after the 'MAME 2 Players
-# shows zero extras' report): subset wheels fall back to the PARENT MAME
-# system's video folder - so only the PARENT's folder is shared. A video
-# there may be removed only when every other system that lists the game
-# has its own copy. A subset's own folder is read by nobody else and gets
-# normal per-system cleanup. Cached per session (a TTL that expired while
-# the analysis thread walked ~400 systems made it re-parse every XML over
-# and over - the tab looked stuck at 'analyzing').
+# cross-system protection (user rule): a video in ANY system's Video
+# folder is kept whenever another system's XML lists a game of that name
+# and that system lacks its own copy - the MAME folder maintains videos
+# for every subset wheel (good clones, 2 Players, ...). A video whose
+# claimants all hold their own copies stays deletable, which is what
+# keeps subset folders cleanable. The 'parent' (largest MAME-style
+# system) is used by Missing Art's fallback coverage. Cached per session
+# (a TTL that expired while the analysis thread walked ~400 systems made
+# the tab look stuck at 'analyzing').
 _share_cache = {"root": None, "usage": {}, "parent": None, "vstems": {}}
 
 
@@ -52,7 +54,15 @@ def _share_info(cfg):
             continue
         for g in games:
             usage.setdefault(g.name.lower(), []).append(system)
-        if len(games) > best_n:
+        # the parent must be the largest MAME-STYLE system: a big console
+        # set (user's Commodore Amiga, 5246 games > MAME's 4531) stole
+        # parent status and silently disabled the shared-folder
+        # protection, letting clone-used videos be removed
+        names = [g.name for g in games[:40]]
+        mameish = bool(names) and sum(
+            1 for n in names
+            if re.fullmatch(r"[a-z0-9_]{1,12}", n)) >= 0.7 * len(names)
+        if mameish and len(games) > best_n:
             best, best_n = system, len(games)
     _share_cache.update(root=root, usage=usage, parent=best, vstems={})
     return usage, best
@@ -84,10 +94,9 @@ def _folders(cfg, system):
 
 def orphans(cfg, system, kinds=KINDS):
     """{kind: [filename, ...]} of top-level files whose stem matches no
-    game in the system XML (case-insensitive). When SYSTEM IS THE PARENT
-    (the largest system - the folder subset wheels fall back to), a video
-    is additionally protected while any other system lists the game and
-    lacks its own copy; the count goes into out['shared_video'].
+    game in the system XML (case-insensitive). A video is additionally
+    protected - in ANY system's folder - while another system lists the
+    game and lacks its own copy; the count goes into out['shared_video'].
     out['missing_dirs'] lists art folders that do not exist (path
     diagnosis). Raises OSError when the XML is unreadable."""
     xml = hdb.system_xml_path(cfg["hyperspin_root"], system)
@@ -131,15 +140,18 @@ def orphans(cfg, system, kinds=KINDS):
                 if s in valid:
                     continue
                 if kind == "video":
+                    # protection applies in EVERY system's video folder
+                    # (user rule): a video stays whenever another system
+                    # lists the game and lacks its own copy - regardless
+                    # of which system is being cleaned
                     if usage is None:
                         usage, parent = _share_info(cfg)
-                    if system == parent:
-                        others = [t for t in usage.get(s, ())
-                                  if t != system]
-                        if any(s not in _own_video_stems(cfg, t)
-                               for t in others):
-                            out["shared_video"] += 1
-                            continue            # a fallback user needs it
+                    others = [t for t in usage.get(s, ())
+                              if t != system]
+                    if others and any(s not in _own_video_stems(cfg, t)
+                                      for t in others):
+                        out["shared_video"] += 1
+                        continue                # another system needs it
                 found.append(e.name)
         out[kind] = sorted(found)
     return out
