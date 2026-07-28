@@ -597,9 +597,18 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                             log(f"[{system}] EmuMovies: connection failed ({e})")
                             emu = False
                     if emu:
-                        missing = _from_emumovies(
-                            cfg, emu, system, art, folder, missing,
-                            added, log, check_stop, cat=emu_cat)
+                        try:
+                            missing = _from_emumovies(
+                                cfg, emu, system, art, folder, missing,
+                                added, log, check_stop, cat=emu_cat)
+                        except StopRequested:
+                            raise
+                        except Exception as e:
+                            # a dying FTP session (SSL EOF etc.) must not
+                            # kill the system's whole art pass
+                            log(f"[{system}] EmuMovies error "
+                                f"({e or type(e).__name__}) — continuing "
+                                f"with the remaining sources")
 
             # -- 3) LaunchBox GamesDB clear logos (wheels only) --
             # knowledge base: transparent clear logos, free, no API key;
@@ -684,6 +693,16 @@ def _alias_title(desc):
     return REGION_ALIASES.get(key)
 
 
+def _mameish(games) -> bool:
+    """True when the games look like MAME roms (short lowercase rom
+    names) - the signature of a custom MAME-subset wheel."""
+    names = [g.name for g in games[:40]]
+    if not names:
+        return False
+    hits = sum(1 for n in names if re.fullmatch(r"[a-z0-9_]{1,12}", n))
+    return hits >= 0.7 * len(names)
+
+
 def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
                     check_stop, cat=None):
     still = list(missing)
@@ -698,6 +717,19 @@ def _from_emumovies(cfg, emu, system, art, folder, missing, added, log,
         if not raw_pools:
             for vd in emu.find_video_dirs(system):
                 raw_pools.append((vd, emu.list_videos(vd), "live"))
+        if not raw_pools and _mameish(still):
+            # custom MAME-subset wheels (Arcade Shmups, Cave, Capcom Play
+            # System…) hold MAME roms - their snaps live in the MAME
+            # Arcade folders
+            for vd, fl in emucatalog.video_pools(cat, "MAME"):
+                raw_pools.append((vd, fl, "catalog, MAME-subset fallback"))
+            if not raw_pools:
+                for vd in emu.find_video_dirs("MAME"):
+                    raw_pools.append((vd, emu.list_videos(vd),
+                                      "live, MAME-subset fallback"))
+            if raw_pools:
+                log(f"[{system}] EmuMovies: rom-style names detected — "
+                    f"treating as a MAME subset (MAME Arcade folders)")
         if not raw_pools:
             log(f"[{system}] EmuMovies: no video-snap folder matched — if "
                 f"one exists, add it to data\\emumovies_map.json under "
