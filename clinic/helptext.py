@@ -163,7 +163,11 @@ name or by the number of extra files) and each system's line shows
 how many extras exist per art type. Pick the art types (Wheel art /
 Videos / Themes), press Delete, and confirm the warning: the selected
 art types' files that do not exist in each selected system's XML are
-removed, because the system does not use them. NEVER touched: the
+removed, because the system does not use them. In the VIDEO folder,
+jpg/png images are also cleaned: an image whose game has a real
+mp4/flv is SUPERSEDED and removed (the video is the only needed
+source); an image matching no game is removed; an image serving as
+the game's only stand-in is kept. NEVER touched: the
 Themes default.zip, any folders inside the art-type folders, and —
 in the PARENT MAME system's folder only (the largest system, the one
 subset wheels fall back to) — any video that another system lists

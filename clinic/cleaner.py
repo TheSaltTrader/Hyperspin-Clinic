@@ -102,15 +102,32 @@ def orphans(cfg, system, kinds=KINDS):
         if not os.path.isdir(folder):
             out["missing_dirs"].append(os.path.basename(folder) or kind)
         else:
+            vid_stems = set()
+            if kind == "video":
+                for e in os.scandir(folder):
+                    if e.is_file():
+                        stem, ext = os.path.splitext(e.name)
+                        if ext.lower() in (".mp4", ".flv"):
+                            vid_stems.add(stem.lower())
             for e in os.scandir(folder):
                 if not e.is_file():
                     continue                    # never touch subfolders
                 stem, ext = os.path.splitext(e.name)
+                s = stem.lower()
+                if (kind == "video"
+                        and ext.lower() in (".png", ".jpg", ".jpeg")):
+                    # images in the Video folder (user rule): a real video
+                    # is the only needed source - remove the image when the
+                    # game's mp4/flv exists (superseded placeholder) or the
+                    # image matches no game at all; keep it only while it
+                    # is the game's sole stand-in
+                    if s not in valid or s in vid_stems:
+                        found.append(e.name)
+                    continue
                 if ext.lower() not in _EXTS[kind]:
                     continue
                 if kind == "theme" and e.name.lower() == "default.zip":
                     continue                    # HyperSpin's fallback theme
-                s = stem.lower()
                 if s in valid:
                     continue
                 if kind == "video":
