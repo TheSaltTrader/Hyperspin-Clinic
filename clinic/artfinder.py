@@ -307,6 +307,24 @@ def system_is_43(system: str) -> bool:
 # a video title
 _SYS_STOP = {"the", "of", "system", "entertainment", "games", "game",
              "computer", "color"}
+# region/collection qualifiers carry no identity either (user rule):
+# 'Nintendo Gamecube Asia' must SEARCH and MATCH as plain Gamecube -
+# nobody titles a longplay with the wheel's region suffix
+_SYS_QUALIFIERS = {"asia", "asian", "europe", "european", "usa", "america",
+                   "american", "japan", "japanese", "korea", "korean",
+                   "china", "chinese", "brazil", "world", "pal", "ntsc",
+                   "region", "hacks", "hack", "homebrew", "unlicensed",
+                   "prototypes", "proto", "protos", "collection",
+                   "collections", "classics", "favorites", "favourites",
+                   "exclusives", "best"}
+
+
+def _sys_search_term(system: str) -> str:
+    """The system as a YouTube SEARCH term: qualifier words stripped so
+    long wheel names still find plain '<console> longplay' videos."""
+    words = re.sub(r"[^a-zA-Z0-9 ]", " ", system or "").split()
+    kept = [w for w in words if w.lower() not in _SYS_QUALIFIERS]
+    return " ".join(kept) or (system or "")
 _SYS_ALIASES = {
     "super nintendo entertainment system": ["snes"],
     "nintendo entertainment system": ["nes"],
@@ -320,7 +338,8 @@ _SYS_ALIASES = {
 
 def _system_tokens(system: str):
     base = re.sub(r"[^a-z0-9 ]", " ", system.lower())
-    toks = {t for t in base.split() if len(t) >= 3 and t not in _SYS_STOP}
+    toks = {t for t in base.split() if len(t) >= 3 and t not in _SYS_STOP
+            and t not in _SYS_QUALIFIERS}
     toks.add(re.sub(r"[^a-z0-9]", "", base))
     for key, aliases in _SYS_ALIASES.items():
         if key in base or base.strip() in key:
@@ -584,9 +603,12 @@ def youtube_video(desc, dst_path, log, cfg=None, check_stop=None,
     tmp = dst_path + ".yt.mp4"
     sys_term = ""
     if system:
+        # qualifier words (Asia, Hacks, Collection...) are stripped from
+        # the SEARCH too - they poisoned the results before the title
+        # filter ever saw them (user report: barely any results)
         sys_term = " " + ("arcade" if ("mame" in system.lower()
                                        or "arcade" in system.lower())
-                          else system)
+                          else _sys_search_term(system))
     # per-GAME aspect from the knowledge base (user rule): 4:3 systems
     # force 4:3, 16:9 systems keep widescreen, MIXED post-2000 arcade
     # systems (NesicaXlive, Type X, ...) decide per game - trained
