@@ -242,12 +242,17 @@ Three steps, run per checked system in order:
    Info.txt ("Converted to 16:9 by HyperSpin Theme Suite", the
    mrfomt convention) and BYPASSED on future runs - re-running
    only processes themes not yet marked 16:9.
-   SELF-REPAIR (converter v3.0): a theme that an older run stamped but
+   SELF-REPAIR (converter v3.1): a theme that an older run stamped but
    left unconverted (near-square video box on a HORIZONTAL game, e.g.
    timekill, or a localized frame bezel with forceaspect absent) is
    detected on the next Convert run - our stamp only bypasses when the
-   theme's XML really carries converted geometry. Just re-run Convert
-   on an already-processed system: mis-kept themes are rebuilt from
+   theme's XML really carries converted geometry. Bezel frames are
+   warped from their PAINTED hole (measured from the art's alpha, not
+   the declared video box - authors sometimes paint a different
+   window) so the frame HUGS the video, and an integrity check
+   reconverts any output whose hole does not hug its box - earlier
+   bad warps heal automatically. Just re-run Convert on an
+   already-processed system: mis-kept themes are rebuilt from
    Themes_backup, logged as REPAIRED, their stale staging recording is
    cleared, and a following Record + Install refreshes their videos.
    Nothing needs to be copied back by hand.
