@@ -686,17 +686,24 @@ class ClinicApp(tk.Tk):
         self.sys_canvas = self.sys_list.canvas
 
         def _wheel(e):
-            idx = self.nb.index(self.nb.select())
-            canvas = {0: getattr(self, "setup_canvas", None),
-                      1: self.sys_list.canvas,
-                      2: getattr(getattr(self, "art_list", None), "canvas", None),
-                      3: getattr(getattr(self, "rename_list", None), "canvas", None),
-                      4: getattr(getattr(self, "themes_list", None), "canvas", None),
-                      6: getattr(self, "rv_canvas", None)}.get(idx)
-            # idx 5 (Ask AI) intentionally absent: the chat Text widget
-            # scrolls itself via the Text class binding
-            if canvas:
-                canvas.yview_scroll(-1 * (e.delta // 120), "units")
+            # user rule: the wheel scrolls ONLY the pane under the mouse,
+            # one step per notch. Text/Listbox/Treeview/Scrollbar widgets
+            # (logs, chat, the enrich tree) scroll THEMSELVES via their
+            # Tk class binding - this handler must leave them alone (the
+            # old tab-indexed handler scrolled the system list along with
+            # whatever log the mouse was actually over).
+            try:
+                w = self.winfo_containing(e.x_root, e.y_root)
+            except (KeyError, tk.TclError):
+                return
+            while w is not None:
+                if isinstance(w, (tk.Text, tk.Listbox, ttk.Treeview,
+                                  ttk.Scrollbar)):
+                    return                   # scrolls itself
+                if isinstance(w, tk.Canvas):
+                    w.yview_scroll(-1 if e.delta > 0 else 1, "units")
+                    return
+                w = getattr(w, "master", None)
         self.sys_canvas.bind_all("<MouseWheel>", _wheel)
 
         opts = ttk.Frame(tab)
