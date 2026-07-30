@@ -878,6 +878,18 @@ class ClinicApp(tk.Tk):
         ttk.Checkbutton(r2, text="EmuMovies", variable=self.art_opts["emumovies"]).pack(side="left", padx=(8, 0))
         ttk.Checkbutton(r2, text="LaunchBox wheels", variable=self.art_opts["launchbox"]).pack(side="left", padx=(8, 0))
         ttk.Checkbutton(r2, text="YouTube", variable=self.art_opts["youtube"]).pack(side="left", padx=(8, 0))
+        r3 = ttk.Frame(opts); r3.pack(anchor="w")
+        ttk.Label(r3, text="Name matching: ", style="Sub.TLabel").pack(side="left")
+        # deliberately NOT persisted (user rule): every start opens on the
+        # recommended level; hack-style wheels are always exact regardless
+        self.var_match = tk.StringVar(value=artfinder.DEFAULT_MATCH_LEVEL)
+        cmb_match = ttk.Combobox(r3, textvariable=self.var_match,
+                                 state="readonly", width=24,
+                                 values=list(artfinder.MATCH_LEVELS))
+        cmb_match.pack(side="left")
+        ttk.Label(r3, style="Sub.TLabel",
+                  text="  (hack/translation wheels always match exactly)"
+                  ).pack(side="left")
 
         run = ttk.Frame(tab)
         run.pack(fill="x", pady=(6, 4), **pad)
@@ -1177,6 +1189,8 @@ class ClinicApp(tk.Tk):
         if self.art_opts["emumovies"].get() and not secrets.emumovies_stored():
             self._art_log("note: no EmuMovies credentials stored (Setup tab) — that source will be skipped")
         artfinder._yt_reset_block_state()   # cooldown state is per RUN
+        artfinder.set_match_level(self.var_match.get())
+        self._art_log(f"name matching level: {self.var_match.get()}")
         self._art_stop = False
         self.btn_art_start.configure(state="disabled")
         self.btn_art_stop.configure(state="normal")

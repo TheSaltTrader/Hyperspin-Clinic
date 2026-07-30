@@ -74,14 +74,55 @@ def norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s)
 
 
-def best_match(target: str, pool: dict, cutoff=0.88):
+# ---------- matching strictness (user rule) ----------
+# The fuzzy rules that catch punctuation/region/subtitle variants of
+# real games turn into wrong-game generators on wheels whose titles are
+# near-misses of official games BY DESIGN (hacks, translations,
+# bootlegs...). Those systems are auto-detected and matched EXACTLY.
+# The level below is UI-selectable per run and always RESETS to the
+# recommended default at startup (never persisted).
+MATCH_LEVELS = {
+    "Exact only":             {"cutoff": None, "prefix": False},
+    "Precise":                {"cutoff": 0.94, "prefix": True},
+    "Standard (recommended)": {"cutoff": 0.88, "prefix": True},
+    "Loose":                  {"cutoff": 0.80, "prefix": True},
+}
+DEFAULT_MATCH_LEVEL = "Standard (recommended)"
+_match = dict(MATCH_LEVELS[DEFAULT_MATCH_LEVEL])
+
+
+def set_match_level(name: str):
+    _match.clear()
+    _match.update(MATCH_LEVELS.get(name, MATCH_LEVELS[DEFAULT_MATCH_LEVEL]))
+
+
+_STRICT_SYS_RE = re.compile(
+    r"\b(hack(s|ed)?|romhack(s)?|translat(ed|ion|ions)|homebrew"
+    r"|unlicensed|unl|bootleg(s)?|pirate(d|s)?|fan[- ]?games?|mods?)\b",
+    re.I)
+
+
+def strict_system(system: str) -> bool:
+    """True for wheels whose titles are near-misses of official games by
+    design - they get exact-name matching regardless of the UI level."""
+    return bool(_STRICT_SYS_RE.search(system or ""))
+
+
+def best_match(target: str, pool: dict, cutoff=-1):
     """pool: {normalized: original}. Exact key first; then unique
     subtitle-prefix (file 'Marvel vs Capcom 2 - New Age of Heroes' must
-    match game 'Marvel vs. Capcom 2'); then close match."""
+    match game 'Marvel vs. Capcom 2'); then close match. cutoff -1 =
+    use the current matching level; None = exact only."""
     t = norm(target)
     if t in pool:
         return pool[t]
-    if len(t) >= 8:
+    if cutoff == -1:
+        cutoff = _match["cutoff"]
+        if not _match["prefix"]:
+            cutoff = None
+    if cutoff is None:
+        return None                       # exact-name matching only
+    if len(t) >= 8 and _match["prefix"]:
         pref = [k for k in pool if k.startswith(t)]
         if len(pref) == 1:
             return pool[pref[0]]
@@ -755,6 +796,18 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
     if opts.get("video"):
         jobs.append(("video", paths["video"], VIDEO_PRESENT_EXTS))
 
+    # hack-style wheels (user rule): titles are near-misses of official
+    # games BY DESIGN - fuzzy matching would systematically fetch the
+    # wrong game's art, so this system runs EXACT-name matching only,
+    # whatever level the UI selected
+    strict = strict_system(system)
+    prev_match = dict(_match)
+    if strict:
+        _match.clear()
+        _match.update(MATCH_LEVELS["Exact only"])
+        log(f"[{system}] hack-style wheel — EXACT name matching only "
+            f"(fuzzy art guesses disabled for this system)")
+
     emu = None
     emu_cat = None
     try:
@@ -889,7 +942,8 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                         still.append(g)
                         continue
                     data = launchbox.fetch_clear_logo(
-                        g.description or g.name, system, log)
+                        g.description or g.name, system, log,
+                        strict=strict or _match["cutoff"] is None)
                     if data:
                         dst = os.path.join(folder, g.name + ".png")
                         try:
@@ -934,6 +988,8 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
             if missing:
                 log(f"[{system}] {art}: {len(missing)} still missing after all sources")
     finally:
+        _match.clear()
+        _match.update(prev_match)
         if emu:
             emu.close()
         _track(cfg, added, log)
