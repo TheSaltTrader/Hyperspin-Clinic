@@ -110,6 +110,15 @@ so a video available there is not missing and is never re-downloaded
 (the log shows "N covered by the MAME folder fallback"). CLONES count
 too: a clone's video IS its parent rom's video (<cloneof> in the XML),
 so an available parent video means the clone is not missing.
+NAME MATCHING LEVEL: the "Name matching" selector controls how fuzzy
+the art matching is (Exact only / Precise / Standard / Loose). It
+always opens on "Standard (recommended)" — the choice is per run and
+never remembered. HACK-STYLE WHEELS (name contains hack/hacked/
+romhack/translation/homebrew/unlicensed/bootleg/pirate/fan game/mod)
+are ALWAYS matched exactly whatever the selector says: their titles
+are near-misses of official games by design, and fuzzy rules would
+systematically download the wrong (base) game's art. Games without an
+exact match honestly stay missing instead.
 Sources are tried in the knowledge base's order:
  1. LOCAL FIRST — alias-named files already in the system's own folders
     (case / punctuation / region variants, roman numerals). For videos

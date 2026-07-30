@@ -68,12 +68,22 @@ def _platform_hint(system: str) -> str:
     return s
 
 
-def find_game(title: str, system: str):
+def _sim(a: str, b: str) -> float:
+    import difflib
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def find_game(title: str, system: str, strict: bool = False):
     """(id, slug) via the knowledge base's query/platform ladder:
-    platform-exact title, platform contains, any-platform exact, first."""
+    platform-exact title, platform contains, any-platform exact, then a
+    SIMILARITY-GATED fallback (>=0.80 - LaunchBox previously returned
+    its first card unconditionally, which downloaded the wrong game's
+    logo for every title the DB doesn't know). strict=True (hack-style
+    wheels / 'Exact only' level): exact normalized title only - no base-
+    title queries, no substring, no fallback."""
     hint = _platform_hint(system)
     queries = [title]
-    if " - " in title:
+    if " - " in title and not strict:
         queries += [title.replace(" - ", ": "), title.split(" - ")[0],
                     title.replace(" - ", " ")]
     nt = _norm(title)
@@ -86,17 +96,19 @@ def find_game(title: str, system: str):
         for gid, slug, t, _plat in onplat:
             if _norm(t) == nt:
                 return gid, slug
+        if strict:
+            continue
         for gid, slug, t, _plat in onplat:
             if nt in _norm(t) or _norm(t) in nt:
                 return gid, slug
-        if onplat and fallback is None:
+        if onplat and fallback is None and _sim(_norm(onplat[0][2]), nt) >= 0.80:
             fallback = (onplat[0][0], onplat[0][1])
         for gid, slug, t, _plat in cards:
             if _norm(t) == nt:
                 return gid, slug
-        if fallback is None:
+        if fallback is None and _sim(_norm(cards[0][2]), nt) >= 0.80:
             fallback = (cards[0][0], cards[0][1])
-    return fallback
+    return None if strict else fallback
 
 
 def logo_urls(gid: str, slug: str):
@@ -135,11 +147,11 @@ def _usable_logo(data: bytes):
     return out.getvalue()
 
 
-def fetch_clear_logo(name: str, system: str, log=None):
+def fetch_clear_logo(name: str, system: str, log=None, strict: bool = False):
     """PNG bytes of a transparent clear logo for the game, or None."""
     title = clean_title(name)
     try:
-        pg = find_game(title, system)
+        pg = find_game(title, system, strict=strict)
     except Exception as e:
         if log:
             log(f"    launchbox search error: {e}")
