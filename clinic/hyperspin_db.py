@@ -163,6 +163,12 @@ def _set_tag(block: str, tag: str, value: str) -> str:
     m = re.search(_TAG.format(t=tag), block, re.S | re.I)
     if m:
         return block[:m.start(1)] + esc + block[m.end(1):]
+    # self-closing empty form (<year/>) - REPLACE it in place: inserting
+    # a fresh tag next to it left a duplicate empty behind (user-reported)
+    sm = re.search(rf"<{tag}\s*/>", block, re.I)
+    if sm:
+        return (block[:sm.start()] + f"<{tag}>{esc}</{tag}>"
+                + block[sm.end():])
     line = f"<{tag}>{esc}</{tag}>"
     dm = re.search(r"</description>", block, re.I)
     if dm:
@@ -219,3 +225,46 @@ def apply_updates(xml_path: str, updates: dict, only_fill_empty=True,
             bdir, os.path.basename(xml_path) + "." + stamp + ".bak"))
         write_db_text(xml_path, "".join(out), enc)
     return changed
+
+
+def fix_empty_tags(xml_path: str, tags=("year", "manufacturer", "genre"),
+                   backup_dir=None):
+    """Remove leftover EMPTY tags (<year/> or <year></year>) from every
+    game block that ALSO carries a filled copy of the same tag - the
+    duplicate pair a pre-fix enrichment left behind (user-reported).
+    Pure text surgery, no AI, no reformat of anything else. Returns
+    (games_fixed, empties_removed); backs up before writing."""
+    text, enc = read_db_text(xml_path)
+    changed = removed = 0
+    out, pos = [], 0
+    for m in re.finditer(r"<game\b[^>]*/>|<game\b[^>]*>.*?</game>", text, re.S):
+        block = m.group(0)
+        nb = block
+        for t in tags:
+            has_filled = any(
+                f.group(1).strip()
+                for f in re.finditer(_TAG.format(t=t), nb, re.S | re.I))
+            if not has_filled:
+                continue                # nothing to prefer - leave as-is
+            nb, n = re.subn(rf"<{t}\s*(?:/>|>\s*</{t}>)", "", nb,
+                            flags=re.I)
+            removed += n
+        if nb != block:
+            # drop the whitespace-only lines the removals left behind
+            nb = re.sub(r"(\r?\n)[ \t]+(?=\r?\n)", "", nb)
+            changed += 1
+        out.append(text[pos:m.start()])
+        out.append(nb)
+        pos = m.end()
+    out.append(text[pos:])
+    if changed:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        bdir = backup_dir or os.path.join(os.path.dirname(xml_path),
+                                          "clinic_backups")
+        os.makedirs(bdir, exist_ok=True)
+        # own suffix: an apply_updates backup taken the same second must
+        # not be overwritten
+        shutil.copy2(xml_path, os.path.join(
+            bdir, os.path.basename(xml_path) + "." + stamp + ".fix.bak"))
+        write_db_text(xml_path, "".join(out), enc)
+    return changed, removed

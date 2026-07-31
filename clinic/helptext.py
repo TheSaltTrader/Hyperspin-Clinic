@@ -81,6 +81,15 @@ For each checked system, Start enrichment:
     overwritten),
  4. indexes every game into the vector database and Elasticsearch under
     the system name.
+REPAIR DUPLICATE EMPTY TAGS ONLY — a past enrichment bug inserted the
+new <year>/<manufacturer>/<genre> next to an existing EMPTY one
+(<year/>) instead of replacing it, leaving both in the game entry
+(fixed since; new runs replace in place). Tick this checkbox and
+press Start to run ONLY the cleanup: every empty tag sitting next to
+a filled copy of the same tag is removed, across ALL systems
+(selection is ignored — the damage can be anywhere), instantly and
+with NO AI cost. Timestamped backups land in each database's
+clinic_backups folder; nothing else in the XML is touched.
 Games the model cannot identify from its own knowledge (typically
 recent 2024+ releases past its training data) are automatically
 retried in a WEB-SEARCH pass: the AI looks each one up online (one
