@@ -721,6 +721,16 @@ class ClinicApp(tk.Tk):
                                     "(they are cached and skipped for free "
                                     "otherwise)"),
                         variable=self.var_retry_failed).pack(anchor="w")
+        rfix = ttk.Frame(opts); rfix.pack(anchor="w")
+        self.var_fix_tags = tk.BooleanVar(value=False)
+        ttk.Checkbutton(rfix, text="Repair duplicate empty tags only",
+                        variable=self.var_fix_tags).pack(side="left")
+        ttk.Label(rfix, style="Sub.TLabel",
+                  text=("— removes leftover <year/>, <manufacturer/> and "
+                        "<genre/> sitting next to a filled value (a past "
+                        "enrichment bug). Runs on ALL systems, instant, "
+                        "no AI cost; nothing else is touched.")
+                  ).pack(side="left")
 
         run = ttk.Frame(tab)
         run.pack(fill="x", pady=(6, 4), **pad)
@@ -783,6 +793,9 @@ class ClinicApp(tk.Tk):
 
 
     def _start_enrich(self):
+        if self.var_fix_tags.get():
+            self._start_fix_tags()      # repair mode: all systems, no AI
+            return
         selected = self.sys_list.selected()
         if not selected:
             messagebox.showinfo("Systems", "No systems selected.")
@@ -831,6 +844,65 @@ class ClinicApp(tk.Tk):
                 self._log(f"=== finished ({done}/{total} systems) ===")
                 self.after(0, lambda: self.lbl_sys_status.configure(
                     text=f"100% — finished {done}/{total} system(s)"))
+            finally:
+                self.after(0, lambda: (self.btn_start.configure(state="normal"),
+                                       self.btn_stop.configure(state="disabled")))
+
+        self._worker = threading.Thread(target=run, daemon=True)
+        self._worker.start()
+
+    def _start_fix_tags(self):
+        """No-AI repair (user rule): strip duplicate EMPTY year/
+        manufacturer/genre tags from every system's XML - selection is
+        ignored on purpose, the damage can be anywhere."""
+        root = self.cfg.get("hyperspin_root", "")
+        systems = hdb.list_systems(root)
+        if not systems:
+            messagebox.showinfo("Systems", "No systems found — set the "
+                                "HyperSpin folder in Setup first.")
+            return
+        self._stop = False
+        self.btn_start.configure(state="disabled")
+        self.btn_stop.configure(state="normal")
+        self.pb.configure(maximum=len(systems), value=0)
+        self._log(f"=== repairing duplicate empty tags in ALL "
+                  f"{len(systems)} system(s) — no AI used ===")
+
+        def run():
+            fixed_total = removed_total = touched = 0
+            try:
+                for i, s_name in enumerate(systems):
+                    if self._stop:
+                        self._log("— stopped by user —")
+                        break
+                    try:
+                        games, removed = hdb.fix_empty_tags(
+                            hdb.system_xml_path(root, s_name))
+                        if removed:
+                            touched += 1
+                            fixed_total += games
+                            removed_total += removed
+                            self._log(f"[{s_name}] {removed} empty tag(s) "
+                                      f"removed across {games} game(s) "
+                                      f"(backup in clinic_backups)")
+                    except OSError:
+                        pass            # no database XML for this system
+                    except Exception as e:
+                        self._log(f"[{s_name}] ERROR: {e}")
+                    self.after(0, lambda v=i + 1: self.pb.configure(value=v))
+                self._log(f"=== repair done: {removed_total} empty tag(s) "
+                          f"removed across {fixed_total} game(s) in "
+                          f"{touched} system(s) ===")
+                self.after(0, lambda: (
+                    self.lbl_sys_status.configure(
+                        text=f"repair done — {removed_total} empty tag(s) "
+                             f"removed in {touched} system(s)"),
+                    messagebox.showinfo(
+                        "Systems",
+                        f"Repair complete.\n\n{removed_total} duplicate "
+                        f"empty tag(s) removed across {fixed_total} "
+                        f"game(s) in {touched} system(s).\nBackups are in "
+                        f"each database's clinic_backups folder.")))
             finally:
                 self.after(0, lambda: (self.btn_start.configure(state="normal"),
                                        self.btn_stop.configure(state="disabled")))
