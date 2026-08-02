@@ -97,6 +97,15 @@ def scan(cfg, system, target, roms_dir="", min_pct=60, n_candidates=4, log=print
     not already canonically named are offered as candidates."""
     xml = hdb.system_xml_path(cfg["hyperspin_root"], system)
     games = hdb.parse_games(hdb.read_db_text(xml)[0])
+    # hack/translation wheels (user rule, same as the Missing Art tab):
+    # titles are near-misses of official games by design - only EXACT
+    # name matches may be auto-selected; fuzzy candidates stay listed
+    # for manual picking
+    from .artfinder import strict_system
+    if strict_system(system):
+        min_pct = 100
+        log(f"[{system}] hack-style wheel — only EXACT matches are "
+            f"auto-selected (candidates still listed for manual review)")
     folder = target_folder(cfg, system, target, roms_dir)
     exts = TARGETS[target]["exts"]
     files = _files(folder, exts)

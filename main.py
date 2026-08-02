@@ -1623,9 +1623,24 @@ class ClinicApp(tk.Tk):
         self.rn_target = tk.StringVar(value="video")
         for val, txt in (("video", "Videos"), ("wheel", "Wheel art"), ("rom", "Roms")):
             ttk.Radiobutton(opts, text=txt, value=val, variable=self.rn_target).pack(side="left", padx=(0, 6))
+        ttk.Label(opts, text="Name matching:", style="Sub.TLabel").pack(
+            side="left", padx=(8, 2))
+        # per run, never persisted (user rule): every start opens on the
+        # recommended level; the level presets Min % (fine-tweakable)
+        _RN_LEVELS = {"Exact only": 100, "Precise": 80,
+                      "Standard (recommended)": 60, "Loose": 45}
+        self.var_rn_match = tk.StringVar(value="Standard (recommended)")
+        cmb_rn = ttk.Combobox(opts, textvariable=self.var_rn_match,
+                              state="readonly", width=22,
+                              values=list(_RN_LEVELS))
+        cmb_rn.pack(side="left")
         ttk.Label(opts, text="Min %:", style="Sub.TLabel").pack(side="left", padx=(8, 2))
         self.rn_minpct = tk.IntVar(value=60)
         ttk.Spinbox(opts, from_=0, to=100, width=4, textvariable=self.rn_minpct).pack(side="left")
+        cmb_rn.bind("<<ComboboxSelected>>", lambda e: self.rn_minpct.set(
+            _RN_LEVELS[self.var_rn_match.get()]))
+        ttk.Label(opts, text="  (hack/translation wheels always exact)",
+                  style="Sub.TLabel").pack(side="left")
 
         ttk.Label(tab, style="Sub.TLabel", wraplength=500, justify="left", text=(
             "Rom locations come from the RocketLauncher folder configured in "
