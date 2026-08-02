@@ -184,6 +184,16 @@ Sources are tried in the knowledge base's order:
     release and ASKS before installing it (into data\\tools\\ - the
     app's own copy, preferred over any system yt-dlp). Stale yt-dlp
     is the #1 cause of YouTube failures; say yes when offered.
+FINAL REVIEW (user rule): nothing is installed directly any more.
+Every found icon and video is STAGED, and when the search finishes a
+review popup lists them all with a CHECKBOX each (all ticked by
+default, All/None buttons). Wheels show a thumbnail right in the
+list; the ▶ button opens any item in your default viewer/player -
+videos play WITH SOUND so they can be validated. Press "Install
+checked": ticked items move into their real art folders (placeholder
+images are replaced at that moment) and unticked ones are deleted.
+Closing the popup installs the checked items - identical to pressing
+Install.
 The red analysis line under each system shows missing wheels and
 videos - so you can see at a glance which system needs the most work.
 Every downloaded wheel is curated: transparent border trimmed,
@@ -277,6 +287,12 @@ Three steps, run per checked system in order:
  • Record videos — renders every theme to a 1920x1080 video using the
    suite's recorder (Chrome + ffmpeg; can take a while — the log pane
    streams the recorder's progress live).
+CORRUPTED VIDEOS: the convert step probes every snap; unreadable
+files ("moov atom not found" etc.) are skipped, logged to
+corrupted_videos.log, and at the END of the run a red-text prompt
+lists them and asks whether to PERMANENTLY delete them (user rule) —
+they cannot be played or used, and their themes fall back to no-snap
+handling either way. Decline to keep them listed for inspection.
  • Install videos — replaces theme zips with the recordings as video
    themes; originals go to Themes_backup_pre_videotheme and
    Video_backup_pre_videotheme.

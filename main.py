@@ -1269,6 +1269,7 @@ class ClinicApp(tk.Tk):
         n_sel = len(selected)
         self.pb_art.configure(maximum=n_sel * 100, value=0)
         opts = {k: v.get() for k, v in self.art_opts.items()}
+        opts["review"] = True     # user rule: final review before install
 
         def status(idx, frac, msg):
             overall = round((idx + frac) / n_sel * 100)
@@ -1276,9 +1277,12 @@ class ClinicApp(tk.Tk):
                 self.pb_art.configure(value=(idx + frac) * 100),
                 self.lbl_art_status.configure(text=f"{overall}% — {msg}")))
 
+        artfinder.clear_pending(self._art_log)   # stale staged files
+
         def run():
             done = 0
             total = 0
+            pending = []
             try:
                 for idx, s_name in enumerate(selected):
                     if self._art_stop:
@@ -1291,6 +1295,7 @@ class ClinicApp(tk.Tk):
                             stop_flag=lambda: self._art_stop,
                             progress=lambda f, m, i=idx: status(i, f, m))
                         total += res.get("added", 0)
+                        pending += res.get("items", [])
                     except artfinder.StopRequested:
                         self._art_log("— stopped by user —")
                         break
@@ -1298,14 +1303,99 @@ class ClinicApp(tk.Tk):
                         self._art_log(f"[{s_name}] ERROR: {e}")
                     done += 1
                     status(idx, 1.0, f"{s_name}: done")
-                self._art_log(f"=== finished: {total} item(s) added across {done} system(s) ===")
-                self.after(0, lambda: self.lbl_art_status.configure(
-                    text=f"100% — {total} item(s) added"))
+                self._art_log(f"=== search finished: {total} item(s) found "
+                              f"across {done} system(s) ===")
+                if pending:
+                    self._art_log("opening the final review — nothing is "
+                                  "installed until you confirm")
+                    self.after(0, lambda: self._review_art(pending))
+                else:
+                    self.after(0, lambda: self.lbl_art_status.configure(
+                        text="100% — nothing new found"))
             finally:
                 self.after(0, lambda: (self.btn_art_start.configure(state="normal"),
                                        self.btn_art_stop.configure(state="disabled")))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _review_art(self, items):
+        """Final review popup (user rule): every downloaded icon/video
+        listed with a CHECKBOX (all ticked), viewable/playable (videos
+        open in the default player WITH SOUND) before anything is
+        installed."""
+        from PIL import Image, ImageTk
+        win = tk.Toplevel(self)
+        win.title(f"Final review — {len(items)} new item(s)")
+        win.geometry("860x560")
+        win.transient(self)
+        ttk.Label(win, text=("Untick anything you don't want. ▶ plays a "
+                             "video (with sound) / shows a wheel in your "
+                             "default viewer. Nothing is installed until "
+                             "you press Install."),
+                  style="Sub.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+        wrap = ttk.Frame(win); wrap.pack(fill="both", expand=True, padx=12)
+        canvas = tk.Canvas(wrap, highlightthickness=1,
+                           highlightbackground="#dddddd", bg=BG)
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>", lambda e: canvas.configure(
+            scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        win._thumbs = []                       # keep PhotoImage refs alive
+        for it in items:
+            it["_var"] = tk.BooleanVar(value=True)
+            row = ttk.Frame(inner); row.pack(fill="x", anchor="w", pady=2)
+            ttk.Checkbutton(row, variable=it["_var"]).pack(side="left")
+            if it["art"] == "wheel":
+                try:
+                    im = Image.open(it["staged"]); im.thumbnail((110, 44))
+                    ph = ImageTk.PhotoImage(im)
+                    win._thumbs.append(ph)
+                    tk.Label(row, image=ph, bg=BG).pack(side="left", padx=4)
+                except Exception:
+                    ttk.Label(row, text="[image]").pack(side="left", padx=4)
+            ttk.Button(row, text="▶", width=3,
+                       command=lambda p=it["staged"]: os.startfile(p)
+                       ).pack(side="left", padx=(2, 6))
+            ttk.Label(row, text=f"{it['system']} — {it['game']}  "
+                                f"({it['art']}, {it['source'][:60]})"
+                      ).pack(side="left")
+
+        bar = ttk.Frame(win); bar.pack(fill="x", padx=12, pady=8)
+        ttk.Button(bar, text="All", width=5, command=lambda: [
+            it["_var"].set(True) for it in items]).pack(side="left")
+        ttk.Button(bar, text="None", width=6, command=lambda: [
+            it["_var"].set(False) for it in items]).pack(side="left", padx=(4, 0))
+
+        def install():
+            for it in items:
+                it["accepted"] = it["_var"].get()
+                it.pop("_var", None)
+            win.destroy()
+            def work():
+                ok, rejected = artfinder.finalize_review(
+                    dict(self.cfg), items, self._art_log)
+                self._art_log(f"=== review done: {ok} installed, "
+                              f"{rejected} rejected ===")
+                self.after(0, lambda: (
+                    self.lbl_art_status.configure(
+                        text=f"100% — {ok} installed, {rejected} rejected"),
+                    messagebox.showinfo(
+                        "Missing Art",
+                        f"{ok} item(s) installed"
+                        + (f", {rejected} rejected and deleted."
+                           if rejected else "."))))
+            threading.Thread(target=work, daemon=True).start()
+
+        ttk.Button(bar, text=f"✔ Install checked", command=install
+                   ).pack(side="right")
+        # closing the window = install the checked items (all by default,
+        # matching the pre-review behavior)
+        win.protocol("WM_DELETE_WINDOW", install)
 
     # ---------- Rename tab ----------
     def _build_rename(self, tab):
@@ -1989,11 +2079,64 @@ class ClinicApp(tk.Tk):
                         done += 1
                         status(done, f"{s_name}: {step} done")
                 self._ts_log(f"=== suite finished ({done}/{n_total} steps) ===")
+                # user rule: corrupted videos found during the convert
+                # probe are offered for deletion at the END of the run
+                if "convert" in steps:
+                    bad = []
+                    for s_name in selected:
+                        base = themesuite.system_dir(cfg, s_name)
+                        lp = os.path.join(base, "corrupted_videos.log")
+                        if not os.path.isfile(lp):
+                            continue
+                        try:
+                            for line in open(lp, encoding="utf-8",
+                                             errors="replace"):
+                                name = line.split("\t")[0].strip()
+                                p = os.path.join(base, "Video", name)
+                                if name and os.path.isfile(p):
+                                    reason = (line.split("\t", 1)[1].strip()
+                                              if "\t" in line else "unreadable")
+                                    bad.append((s_name, p, reason))
+                        except OSError:
+                            pass
+                    if bad:
+                        self.after(0, lambda b=bad:
+                                   self._offer_delete_corrupted(b))
             finally:
                 self.after(0, lambda: (self.btn_ts_start.configure(state="normal"),
                                        self.btn_ts_stop.configure(state="disabled")))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _offer_delete_corrupted(self, bad):
+        """End-of-run prompt (user rule): the convert probe found
+        corrupted/unreadable video files - offer to delete them."""
+        preview = "\n".join(
+            f"  {s}: {os.path.basename(p)}  ({r[:60]})"
+            for s, p, r in bad[:12])
+        if len(bad) > 12:
+            preview += f"\n  … and {len(bad) - 12} more"
+        if not self._danger_confirm(
+                "Corrupted videos found",
+                f"{len(bad)} corrupted/unreadable video file(s) were found "
+                f"while probing the snaps (their themes fall back to "
+                f"no-snap handling):\n\n{preview}\n\nPERMANENTLY delete "
+                f"these files? They cannot be played or used."):
+            self._ts_log(f"{len(bad)} corrupted video(s) kept "
+                         f"(listed in corrupted_videos.log)")
+            return
+        deleted = 0
+        for s, p, _r in bad:
+            try:
+                os.remove(p)
+                deleted += 1
+                self._ts_log(f"  - deleted corrupted {s}\\Video\\"
+                             f"{os.path.basename(p)}")
+            except OSError as e:
+                self._ts_log(f"  ! could not delete {os.path.basename(p)}: {e}")
+        self._ts_log(f"{deleted}/{len(bad)} corrupted video file(s) deleted")
+        messagebox.showinfo("Themes", f"{deleted} corrupted video file(s) "
+                            f"deleted.")
 
     # ---------- actions ----------
     def _browse(self):
