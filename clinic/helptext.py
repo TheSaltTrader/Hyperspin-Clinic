@@ -185,15 +185,17 @@ Sources are tried in the knowledge base's order:
     app's own copy, preferred over any system yt-dlp). Stale yt-dlp
     is the #1 cause of YouTube failures; say yes when offered.
 FINAL REVIEW (user rule): nothing is installed directly any more.
-Every found icon and video is STAGED, and when the search finishes a
-review popup lists them all with a CHECKBOX each (all ticked by
-default, All/None buttons). Wheels show a thumbnail right in the
-list; the ▶ button opens any item in your default viewer/player -
-videos play WITH SOUND so they can be validated. Press "Install
-checked": ticked items move into their real art folders (placeholder
-images are replaced at that moment) and unticked ones are deleted.
-Closing the popup installs the checked items - identical to pressing
-Install.
+Every found icon and video is STAGED, and when ALL selected systems
+have finished downloading, one review window opens: ICONS first in a
+grid of medium thumbnail boxes, VIDEOS below in equal boxes. Every
+item has a CHECKBOX (all ticked by default, All/None buttons) and a
+vertical scrollbar covers the whole set. Videos play RIGHT IN THEIR
+BOX — press ▶ and the bundled ffmpeg decodes the frames (so every
+codec it supports plays) while the audio track plays along, no
+external player involved; one video plays at a time. Press "Accept &
+install selected": ticked items move into their own system's art
+folder (placeholder images are replaced at that moment) and unticked
+ones are deleted. Closing the window accepts the current selection.
 The red analysis line under each system shows missing wheels and
 videos - so you can see at a glance which system needs the most work.
 Every downloaded wheel is curated: transparent border trimmed,

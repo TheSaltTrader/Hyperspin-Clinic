@@ -5,7 +5,9 @@
 import os
 import queue
 import re
+import subprocess
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -13,6 +15,152 @@ from clinic import artfinder, config, enrich, hyperspin_db as hdb, secrets
 
 
 SORT_MODES = ("Name A→Z", "Name Z→A", "Missing asc", "Missing desc")
+
+
+def _snap_poster(ff, path, size=(300, 200)):
+    """First-second frame of a video as a letterboxed PIL image."""
+    if not ff:
+        return None
+    try:
+        import io as _io
+        from PIL import Image
+        r = subprocess.run(
+            [ff, "-v", "error", "-ss", "1", "-i", path, "-frames:v", "1",
+             "-f", "image2pipe", "-vcodec", "png", "-"],
+            capture_output=True, timeout=60, creationflags=0x08000000)
+        im = Image.open(_io.BytesIO(r.stdout)).convert("RGB")
+        im.thumbnail((size[0] - 4, size[1] - 4))
+        bg = Image.new("RGB", size, (0, 0, 0))
+        bg.paste(im, ((size[0] - im.width) // 2,
+                      (size[1] - im.height) // 2))
+        return bg
+    except Exception:
+        return None
+
+
+class _SnapPlayer:
+    """Plays a staged snap INSIDE its review box (user rule): frames are
+    decoded by the bundled ffmpeg — so every codec ffmpeg knows plays —
+    and drawn into the card's label at 25 fps; the audio track is
+    pre-extracted to a wav and played in sync via winsound. Only one
+    player runs at a time; pressing another Play stops the current."""
+
+    def __init__(self, app, win, box, btn, path, ffmpeg, size):
+        self.app, self.win, self.box, self.btn = app, win, box, btn
+        self.path, self.ff, self.size = path, ffmpeg, size
+        self.proc = None
+        self.playing = False
+        self.poster = None
+        threading.Thread(target=self._load_poster, daemon=True).start()
+
+    def _alive(self):
+        try:
+            return self.win.winfo_exists()
+        except tk.TclError:
+            return False
+
+    def _load_poster(self):
+        im = _snap_poster(self.ff, self.path, self.size)
+        if im is None or not self._alive():
+            return
+
+        def put():
+            from PIL import ImageTk
+            if not self._alive():
+                return
+            self.poster = ImageTk.PhotoImage(im)
+            self.win._thumbs.append(self.poster)
+            if not self.playing:
+                self.box.configure(image=self.poster)
+        self.app.after(0, put)
+
+    def toggle(self):
+        self.stop() if self.playing else self.play()
+
+    def play(self):
+        if not self.ff:
+            messagebox.showerror("Missing Art", "ffmpeg was not found — "
+                                 "in-window playback needs the bundled "
+                                 "Theme Suite.")
+            return
+        cur = self.win._player.get("cur")
+        if cur and cur is not self:
+            cur.stop()
+        self.win._player["cur"] = self
+        self.playing = True
+        self.btn.configure(text="■ Stop")
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        import winsound
+        W, H = self.size
+        wav = self.path + ".wav"
+        if not os.path.isfile(wav):
+            subprocess.run(
+                [self.ff, "-v", "error", "-y", "-i", self.path, "-vn",
+                 "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", wav],
+                capture_output=True, timeout=120, creationflags=0x08000000)
+        try:
+            self.proc = subprocess.Popen(
+                [self.ff, "-v", "error", "-i", self.path,
+                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-r", "25",
+                 "-vf", (f"scale={W}:{H}:force_original_aspect_ratio="
+                         f"decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"),
+                 "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                creationflags=0x08000000)
+        except OSError:
+            self.playing = False
+            return
+        if os.path.isfile(wav):
+            try:
+                winsound.PlaySound(wav, winsound.SND_FILENAME
+                                   | winsound.SND_ASYNC)
+            except Exception:
+                pass
+        from PIL import Image, ImageTk
+        nbytes = W * H * 3
+        t0 = time.time()
+        n = 0
+        while self.playing and self._alive():
+            buf = self.proc.stdout.read(nbytes)
+            if not buf or len(buf) < nbytes:
+                break
+            n += 1
+            wait = t0 + n / 25.0 - time.time()
+            if wait > 0:
+                time.sleep(wait)
+            im = Image.frombytes("RGB", (W, H), buf)
+
+            def put(im=im):
+                if self.playing and self._alive():
+                    ph = ImageTk.PhotoImage(im)
+                    self.box.configure(image=ph)
+                    self.box._frame = ph      # newest frame only
+            self.app.after(0, put)
+        self.app.after(0, self.stop)
+
+    def stop(self):
+        self.playing = False
+        try:
+            import winsound
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+        if self.proc:
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+            self.proc = None
+        if self._alive():
+            try:
+                self.btn.configure(text="▶ Play")
+                if self.poster is not None:
+                    self.box.configure(image=self.poster)
+            except tk.TclError:
+                pass
+        if self.win._player.get("cur") is self:
+            self.win._player["cur"] = None
 
 
 class SystemListPanel:
@@ -1319,19 +1467,24 @@ class ClinicApp(tk.Tk):
         threading.Thread(target=run, daemon=True).start()
 
     def _review_art(self, items):
-        """Final review popup (user rule): every downloaded icon/video
-        listed with a CHECKBOX (all ticked), viewable/playable (videos
-        open in the default player WITH SOUND) before anything is
-        installed."""
+        """Final review popup (user rules): opens once, at the END of all
+        selected systems. IMAGES first in a grid of medium thumbnail
+        boxes, VIDEOS below in equal boxes that play IN PLACE (frames
+        decoded by the bundled ffmpeg - every codec it supports - with
+        sound) — no external player. Ticked items are installed into
+        their own system's folder by Accept."""
         from PIL import Image, ImageTk
+        BOXW, BOXH = 300, 200                     # medium video box
         win = tk.Toplevel(self)
         win.title(f"Final review — {len(items)} new item(s)")
-        win.geometry("860x560")
+        win.geometry("1040x680")
         win.transient(self)
-        ttk.Label(win, text=("Untick anything you don't want. ▶ plays a "
-                             "video (with sound) / shows a wheel in your "
-                             "default viewer. Nothing is installed until "
-                             "you press Install."),
+        win._thumbs = []                          # PhotoImage refs
+        win._player = {"cur": None}               # one video at a time
+        ttk.Label(win, text=("Untick anything you don't want, then press "
+                             "Accept. Videos play right in their box, "
+                             "with sound. Nothing is installed until you "
+                             "accept."),
                   style="Sub.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
         wrap = ttk.Frame(win); wrap.pack(fill="both", expand=True, padx=12)
         canvas = tk.Canvas(wrap, highlightthickness=1,
@@ -1345,37 +1498,87 @@ class ClinicApp(tk.Tk):
         canvas.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
-        win._thumbs = []                       # keep PhotoImage refs alive
-        for it in items:
+        wheels = [it for it in items if it["art"] == "wheel"]
+        videos = [it for it in items if it["art"] != "wheel"]
+        COLS = 3
+
+        def card(parent, it, col_row, boxh):
             it["_var"] = tk.BooleanVar(value=True)
-            row = ttk.Frame(inner); row.pack(fill="x", anchor="w", pady=2)
-            ttk.Checkbutton(row, variable=it["_var"]).pack(side="left")
-            if it["art"] == "wheel":
+            c = ttk.Frame(parent, borderwidth=1, relief="solid")
+            c.grid(row=col_row[1], column=col_row[0], padx=6, pady=6,
+                   sticky="n")
+            # a black placeholder fixes the medium box size immediately
+            ph0 = ImageTk.PhotoImage(Image.new("RGB", (BOXW, boxh),
+                                               (16, 16, 16)))
+            win._thumbs.append(ph0)
+            box = tk.Label(c, image=ph0, bg="black")
+            box.pack()
+            ttk.Checkbutton(
+                c, variable=it["_var"],
+                text=f"{it['system']} — {it['game']}"[:44]).pack(
+                anchor="w", padx=4)
+            ttk.Label(c, text=it["source"][:44], style="Sub.TLabel"
+                      ).pack(anchor="w", padx=4)
+            return box
+
+        def show_pil(box, im, boxh):
+            im.thumbnail((BOXW - 4, boxh - 4))
+            bg = Image.new("RGB", (BOXW, boxh), (0, 0, 0))
+            bg.paste(im, ((BOXW - im.width) // 2, (boxh - im.height) // 2))
+            ph = ImageTk.PhotoImage(bg)
+            win._thumbs.append(ph)
+            box.configure(image=ph, text="")
+            box._img = ph
+
+        WHEELH = 140                              # wheels are wide + short
+        if wheels:
+            ttk.Label(inner, text="Icons (wheel art)",
+                      font=("Segoe UI", 11, "bold")).grid(
+                row=0, column=0, columnspan=COLS, sticky="w",
+                padx=6, pady=(6, 0))
+            for i, it in enumerate(wheels):
+                box = card(inner, it, (i % COLS, 1 + i // COLS), WHEELH)
                 try:
-                    im = Image.open(it["staged"]); im.thumbnail((110, 44))
-                    ph = ImageTk.PhotoImage(im)
-                    win._thumbs.append(ph)
-                    tk.Label(row, image=ph, bg=BG).pack(side="left", padx=4)
+                    show_pil(box, Image.open(it["staged"]).convert("RGB"),
+                             WHEELH)
                 except Exception:
-                    ttk.Label(row, text="[image]").pack(side="left", padx=4)
-            ttk.Button(row, text="▶", width=3,
-                       command=lambda p=it["staged"]: os.startfile(p)
-                       ).pack(side="left", padx=(2, 6))
-            ttk.Label(row, text=f"{it['system']} — {it['game']}  "
-                                f"({it['art']}, {it['source'][:60]})"
-                      ).pack(side="left")
+                    box.configure(text="[unreadable image]",
+                                  fg="#bbbbbb", compound="center")
+        vrow0 = 2 + (len(wheels) + COLS - 1) // COLS
+        if videos:
+            ttk.Label(inner, text="Videos",
+                      font=("Segoe UI", 11, "bold")).grid(
+                row=vrow0, column=0, columnspan=COLS, sticky="w",
+                padx=6, pady=(12, 0))
+            ff = artfinder._ffmpeg()
+            for i, it in enumerate(videos):
+                box = card(inner, it, (i % COLS, vrow0 + 1 + i // COLS),
+                           BOXH)
+                btn = ttk.Button(box.master, text="▶ Play")
+                btn.pack(anchor="w", padx=4, pady=(0, 4))
+                player = _SnapPlayer(self, win, box, btn, it["staged"],
+                                     ff, (BOXW, BOXH))
+                btn.configure(command=player.toggle)
 
         bar = ttk.Frame(win); bar.pack(fill="x", padx=12, pady=8)
         ttk.Button(bar, text="All", width=5, command=lambda: [
             it["_var"].set(True) for it in items]).pack(side="left")
         ttk.Button(bar, text="None", width=6, command=lambda: [
             it["_var"].set(False) for it in items]).pack(side="left", padx=(4, 0))
+        lbl_n = ttk.Label(bar, text=f"{len(wheels)} icon(s), "
+                                    f"{len(videos)} video(s)",
+                          style="Sub.TLabel")
+        lbl_n.pack(side="left", padx=12)
 
-        def install():
+        def accept():
+            if win._player["cur"]:
+                win._player["cur"].stop()
             for it in items:
                 it["accepted"] = it["_var"].get()
                 it.pop("_var", None)
+                it.pop("_box_show", None)
             win.destroy()
+
             def work():
                 ok, rejected = artfinder.finalize_review(
                     dict(self.cfg), items, self._art_log)
@@ -1386,16 +1589,16 @@ class ClinicApp(tk.Tk):
                         text=f"100% — {ok} installed, {rejected} rejected"),
                     messagebox.showinfo(
                         "Missing Art",
-                        f"{ok} item(s) installed"
+                        f"{ok} item(s) installed into their systems"
                         + (f", {rejected} rejected and deleted."
                            if rejected else "."))))
             threading.Thread(target=work, daemon=True).start()
 
-        ttk.Button(bar, text=f"✔ Install checked", command=install
-                   ).pack(side="right")
-        # closing the window = install the checked items (all by default,
-        # matching the pre-review behavior)
-        win.protocol("WM_DELETE_WINDOW", install)
+        ttk.Button(bar, text="✔ Accept & install selected",
+                   command=accept).pack(side="right")
+        # closing the window = accept the current selection (all ticked
+        # by default, matching the pre-review behavior)
+        win.protocol("WM_DELETE_WINDOW", accept)
 
     # ---------- Rename tab ----------
     def _build_rename(self, tab):
