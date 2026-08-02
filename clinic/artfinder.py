@@ -190,6 +190,57 @@ def media_paths(cfg, system):
     }
 
 
+def _pending_dir(system, art):
+    """Staging folder for the review popup (user rule): downloads are
+    held here until the user accepts them."""
+    d = os.path.join(config.DATA_DIR, "pending_art",
+                     re.sub(r'[<>:"/\\|?*]', "_", system), art)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def clear_pending(log=None):
+    """Drop leftover staged art from a crashed/aborted run."""
+    d = os.path.join(config.DATA_DIR, "pending_art")
+    if os.path.isdir(d):
+        n = sum(len(fs) for _r, _d, fs in os.walk(d))
+        shutil.rmtree(d, ignore_errors=True)
+        if n and log:
+            log(f"note: {n} staged file(s) from an earlier unfinished run "
+                f"were discarded")
+
+
+def finalize_review(cfg, items, log):
+    """Apply the user's final review (user rule): ACCEPTED items move
+    from staging into their real art folder (with the deferred
+    placeholder purge and database tracking); rejected items are
+    deleted. Returns (installed, rejected)."""
+    keep = [it for it in items if it.get("accepted", True)]
+    drop = [it for it in items if not it.get("accepted", True)]
+    for it in keep:
+        try:
+            os.makedirs(os.path.dirname(it["path"]), exist_ok=True)
+            os.replace(it["staged"], it["path"])
+            if it["art"] == "video":
+                purge_video_placeholders(os.path.dirname(it["path"]),
+                                         it["game"], log)
+            log(f"  + {it['system']}: {it['game']} {it['art']} installed")
+        except OSError as e:
+            log(f"  ! {it['system']}: {it['game']} install failed: {e}")
+    for it in drop:
+        try:
+            os.remove(it["staged"])
+        except OSError:
+            pass
+        log(f"  - {it['system']}: {it['game']} {it['art']} rejected — "
+            f"not installed")
+    if keep:
+        _track(cfg, keep, log)
+    shutil.rmtree(os.path.join(config.DATA_DIR, "pending_art"),
+                  ignore_errors=True)
+    return len(keep), len(drop)
+
+
 def purge_video_placeholders(folder, game_name, log):
     """After a real video was downloaded for the game, delete its jpg/png
     placeholder files from the Video folder (user rule: the new video
@@ -796,6 +847,13 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
     if opts.get("video"):
         jobs.append(("video", paths["video"], VIDEO_PRESENT_EXTS))
 
+    # review staging (user rule): downloads land in data\pending_art
+    # first; a final review popup decides what actually gets INSTALLED.
+    # In staging mode the placeholder purge naturally becomes a no-op
+    # (the staging folder has no placeholders) and runs for real at
+    # install time in finalize_review.
+    review = bool(opts.get("review"))
+
     # hack-style wheels (user rule): titles are near-misses of official
     # games BY DESIGN - fuzzy matching would systematically fetch the
     # wrong game's art, so this system runs EXACT-name matching only,
@@ -813,6 +871,9 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
     try:
         for job_i, (art, folder, exts) in enumerate(jobs):
             check_stop()
+            # every WRITE goes to w_folder; reads (presence, alias pools)
+            # stay on the real folder
+            w_folder = _pending_dir(system, art) if review else folder
             if progress:
                 progress(job_i / max(1, len(jobs)),
                          f"{system}: scanning {art} folder")
@@ -883,7 +944,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                                  or os.path.splitext(src)[0].lower()
                                  != g.name.lower())):
                         ext = os.path.splitext(src)[1]
-                        dst = os.path.join(folder, g.name + ext)
+                        dst = os.path.join(w_folder, g.name + ext)
                         if not os.path.exists(dst):
                             shutil.copy2(os.path.join(src_dir, src), dst)
                             added.append({"system": system, "game": g.name,
@@ -893,7 +954,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                             log(f"  + {g.name} {art} copied from {via} "
                                 f"'{src}'")
                             if art == "video":
-                                purge_video_placeholders(folder, g.name, log)
+                                purge_video_placeholders(w_folder, g.name, log)
                             continue
                     still.append(g)
                 missing = still
@@ -945,7 +1006,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                         g.description or g.name, system, log,
                         strict=strict or _match["cutoff"] is None)
                     if data:
-                        dst = os.path.join(folder, g.name + ".png")
+                        dst = os.path.join(w_folder, g.name + ".png")
                         try:
                             dims = curate_wheel(data, dst)
                             added.append({"system": system, "game": g.name,
@@ -971,7 +1032,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                             log("    unsafe rom name skipped: %r" % g.name)
                             still.append(g)
                             continue
-                        dst = os.path.join(folder, g.name + ".mp4")
+                        dst = os.path.join(w_folder, g.name + ".mp4")
                         title = g.description or g.name
                         if youtube_video(title, dst, log, cfg,
                                          check_stop=check_stop,
@@ -981,7 +1042,7 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
                                           "art": art, "source": "youtube",
                                           "path": dst})
                             log(f"  + {g.name} video from youtube")
-                            purge_video_placeholders(folder, g.name, log)
+                            purge_video_placeholders(w_folder, g.name, log)
                         else:
                             still.append(g)
                     missing = still
@@ -992,8 +1053,18 @@ def find_for_system(cfg, system, opts, log, stop_flag, progress=None):
         _match.update(prev_match)
         if emu:
             emu.close()
-        _track(cfg, added, log)
-    return {"system": system, "added": len(added)}
+        if review and added:
+            # staged path becomes 'staged'; 'path' points at the REAL
+            # destination for finalize_review's install step
+            realf = {"wheel": paths["wheel"], "video": paths["video"]}
+            for it in added:
+                it["staged"] = it["path"]
+                it["path"] = os.path.join(realf[it["art"]],
+                                          os.path.basename(it["path"]))
+        if not review:
+            _track(cfg, added, log)   # review mode tracks at install time
+    return {"system": system, "added": len(added),
+            "items": added if review else []}
 
 
 # region-rename aliases from the media-pipeline knowledge base (EU/JP
