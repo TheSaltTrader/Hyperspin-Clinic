@@ -2205,6 +2205,12 @@ class ClinicApp(tk.Tk):
         }
         ttk.Checkbutton(opts, text="Convert 16:9", variable=self.ts_ops["convert"]).pack(side="left")
         ttk.Checkbutton(opts, text="Record videos", variable=self.ts_ops["record"]).pack(side="left", padx=(6, 0))
+        # Flash themes are left untouched by the converter - the only way
+        # to verify them is to RENDER them (runs the bundled Ruffle Flash
+        # emulator) and play the result in the validator (user rule)
+        self.var_ts_flash = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts, text="Test Flash themes (Ruffle)",
+                        variable=self.var_ts_flash).pack(side="left", padx=(6, 0))
         ttk.Label(opts, style="Sub.TLabel",
                   text="  (recordings are validated and installed from a "
                        "review window after Record)").pack(side="left")
@@ -2256,6 +2262,9 @@ class ClinicApp(tk.Tk):
             return
         steps = [k for k in ("convert", "record")
                  if self.ts_ops[k].get()]
+        test_flash = self.var_ts_flash.get()
+        if test_flash and "flash" not in steps:
+            steps.append("flash")      # Ruffle test renders of swf themes
         if not steps:
             messagebox.showinfo("Themes", "Pick at least one step.")
             return
@@ -2265,8 +2274,20 @@ class ClinicApp(tk.Tk):
         cfg = dict(self.cfg)   # snapshot: Setup edits must not redirect a run
         n_total = len(selected) * len(steps)
         self.pb_ts.configure(maximum=n_total, value=0)
+        def flash_step(cfg_, s_name, log_, stop_, progress=None):
+            zips = themesuite.flash_themes(cfg_, s_name)
+            if not zips:
+                log_(f"[{s_name}] no Flash-only themes found")
+                return True
+            log_(f"[{s_name}] test-rendering {len(zips)} Flash theme(s) "
+                 f"with Ruffle: {', '.join(z[:-4] for z in zips[:6])}"
+                 + ("…" if len(zips) > 6 else ""))
+            return themesuite.record_system(cfg_, s_name, log_, stop_,
+                                            progress=progress, only=zips)
+
         runners = {"convert": themesuite.convert_system,
-                   "record": themesuite.record_system}
+                   "record": themesuite.record_system,
+                   "flash": flash_step}
 
         def status(done, msg):
             self.after(0, lambda: (
@@ -2311,16 +2332,20 @@ class ClinicApp(tk.Tk):
                 self._ts_log(f"=== suite finished ({done}/{n_total} steps) ===")
                 # user rule: after Record, the staged recordings go
                 # through a VALIDATOR (play + accept) before installing
-                if "record" in steps and not self._ts_stop:
+                if ("record" in steps or "flash" in steps) and not self._ts_stop:
                     recs = []
                     for s_name in selected:
                         base = themesuite.system_dir(cfg, s_name)
                         tv = os.path.join(base, "ThemeVideos")
+                        flash = {z[:-4].lower() for z in
+                                 themesuite.flash_themes(cfg, s_name)}
                         if os.path.isdir(tv):
                             for f in sorted(os.listdir(tv)):
                                 if f.lower().endswith(".mp4"):
+                                    game = os.path.splitext(f)[0]
                                     recs.append({"system": s_name,
-                                                 "game": os.path.splitext(f)[0],
+                                                 "game": game,
+                                                 "flash": game.lower() in flash,
                                                  "staged": os.path.join(tv, f),
                                                  "base": base})
                     if recs:
@@ -2404,9 +2429,10 @@ class ClinicApp(tk.Tk):
             win._thumbs.append(ph0)
             box = tk.Label(c, image=ph0, bg="black")
             box.pack()
+            tag = "  [FLASH/Ruffle]" if it.get("flash") else ""
             ttk.Checkbutton(c, variable=it["_var"],
-                            text=f"{it['system']} — {it['game']}"[:44]
-                            ).pack(anchor="w", padx=4)
+                            text=(f"{it['system']} — {it['game']}"[:44]
+                                  + tag)).pack(anchor="w", padx=4)
             btn = ttk.Button(c, text="▶ Play")
             btn.pack(anchor="w", padx=4, pady=(0, 4))
             player = _SnapPlayer(self, win, box, btn, it["staged"], ff,

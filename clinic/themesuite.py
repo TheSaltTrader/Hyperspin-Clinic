@@ -144,8 +144,37 @@ def convert_system(cfg, system, log, stop_flag, progress=None):
     return code == 0
 
 
-def record_system(cfg, system, log, stop_flag, progress=None):
-    """progress(done, total, name, eta_seconds|None) per rendered theme."""
+def flash_themes(cfg, system):
+    """Theme zips whose art is ALL Flash (.swf, no png/jpg). The
+    converter leaves these untouched - they can only be verified by
+    RENDERING them, which runs the bundled Ruffle Flash emulator (user
+    rule: test the flash themes and play them in the validator)."""
+    import zipfile
+    tdir = os.path.join(system_dir(cfg, system), "Themes")
+    out = []
+    if not os.path.isdir(tdir):
+        return out
+    for fname in sorted(os.listdir(tdir)):
+        if not fname.lower().endswith(".zip") or fname.lower() == "default.zip":
+            continue
+        try:
+            with zipfile.ZipFile(os.path.join(tdir, fname)) as z:
+                art = [os.path.basename(n).lower() for n in z.namelist()
+                       if n and not n.endswith("/")
+                       and not os.path.basename(n).startswith(".")
+                       and not n.lower().endswith((".txt", ".xml", ".ini", ".db"))]
+            if art and not any(a.endswith((".png", ".jpg", ".jpeg", ".gif",
+                                           ".bmp")) for a in art) \
+                    and any(a.endswith(".swf") for a in art):
+                out.append(fname)
+        except Exception:
+            pass
+    return out
+
+
+def record_system(cfg, system, log, stop_flag, progress=None, only=None):
+    """progress(done, total, name, eta_seconds|None) per rendered theme.
+    only: list of theme zip names to render (Flash-theme test renders)."""
     p = suite_paths(cfg["theme_suite_root"])
     base = system_dir(cfg, system)
     env = dict(os.environ)
@@ -167,10 +196,12 @@ def record_system(cfg, system, log, stop_flag, progress=None):
             progress(d, tot, m.group(1), eta)
         return False               # results always stay visible
 
-    code = _stream([p["deno"], "run", "--cached-only", "-A", p["render"],
-                    base, "--workers", "1"],
-                   log, stop_flag, cwd=os.path.dirname(p["render"]), env=env,
-                   on_line=on_line)
+    cmd = [p["deno"], "run", "--cached-only", "-A", p["render"],
+           base, "--workers", "1"]
+    if only:
+        cmd += ["--only", ",".join(only)]
+    code = _stream(cmd, log, stop_flag, cwd=os.path.dirname(p["render"]),
+                   env=env, on_line=on_line)
     log(f"[{system}] recorder exit code {code}")
     return code == 0
 
