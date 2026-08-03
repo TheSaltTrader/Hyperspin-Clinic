@@ -144,6 +144,41 @@ def convert_system(cfg, system, log, stop_flag, progress=None):
     return code == 0
 
 
+def testable_themes(cfg, system):
+    """(all_zips, flash_zips) - every theme that can be PLAYED AS ONE
+    composed theme (user rule): raster (png/jpg) themes animate from
+    Theme.xml exactly like their swf counterparts, so both kinds are
+    test-rendered. Native video themes (no art) and default.zip are
+    excluded - they are already videos / never rendered."""
+    import zipfile
+    tdir = os.path.join(system_dir(cfg, system), "Themes")
+    allz, flash = [], []
+    if not os.path.isdir(tdir):
+        return allz, flash
+    for fname in sorted(os.listdir(tdir)):
+        if not fname.lower().endswith(".zip") or fname.lower() == "default.zip":
+            continue
+        try:
+            with zipfile.ZipFile(os.path.join(tdir, fname)) as z:
+                art = [os.path.basename(n).lower() for n in z.namelist()
+                       if n and not n.endswith("/")
+                       and not os.path.basename(n).startswith(".")
+                       and not n.lower().endswith((".txt", ".xml", ".ini", ".db"))]
+            if not art:
+                continue                  # native video theme
+            has_raster = any(a.endswith((".png", ".jpg", ".jpeg", ".gif",
+                                         ".bmp")) for a in art)
+            has_swf = any(a.endswith(".swf") for a in art)
+            if not (has_raster or has_swf):
+                continue
+            allz.append(fname)
+            if has_swf and not has_raster:
+                flash.append(fname)
+        except Exception:
+            pass
+    return allz, flash
+
+
 def flash_themes(cfg, system):
     """Theme zips whose art is ALL Flash (.swf, no png/jpg). The
     converter leaves these untouched - they can only be verified by
