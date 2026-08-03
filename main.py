@@ -2209,7 +2209,7 @@ class ClinicApp(tk.Tk):
         # to verify them is to RENDER them (runs the bundled Ruffle Flash
         # emulator) and play the result in the validator (user rule)
         self.var_ts_flash = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opts, text="Test Flash themes (Ruffle)",
+        ttk.Checkbutton(opts, text="Test themes (play each zip as one)",
                         variable=self.var_ts_flash).pack(side="left", padx=(6, 0))
         ttk.Label(opts, style="Sub.TLabel",
                   text="  (recordings are validated and installed from a "
@@ -2275,13 +2275,16 @@ class ClinicApp(tk.Tk):
         n_total = len(selected) * len(steps)
         self.pb_ts.configure(maximum=n_total, value=0)
         def flash_step(cfg_, s_name, log_, stop_, progress=None):
-            zips = themesuite.flash_themes(cfg_, s_name)
+            # user rule: EVERY theme zip plays as one composed theme -
+            # png-only themes animate from Theme.xml just like their swf
+            # counterparts (which Ruffle renders), so both are rendered
+            zips, flash = themesuite.testable_themes(cfg_, s_name)
             if not zips:
-                log_(f"[{s_name}] no Flash-only themes found")
+                log_(f"[{s_name}] no testable themes found")
                 return True
-            log_(f"[{s_name}] test-rendering {len(zips)} Flash theme(s) "
-                 f"with Ruffle: {', '.join(z[:-4] for z in zips[:6])}"
-                 + ("…" if len(zips) > 6 else ""))
+            log_(f"[{s_name}] test-rendering {len(zips)} theme(s) as "
+                 f"complete themes — {len(flash)} Flash-only (Ruffle), "
+                 f"{len(zips) - len(flash)} raster")
             return themesuite.record_system(cfg_, s_name, log_, stop_,
                                             progress=progress, only=zips)
 
