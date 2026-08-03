@@ -97,6 +97,14 @@ search per game) and verifies year/publisher/genre before answering.
 This is the checkbox "Web-search games the AI can't identify" —
 searches cost about $0.01 each on top of tokens (shown in the log per
 batch); untick it to skip the pass.
+CACHE MATCHING LEVEL — the selector (same logic as the Missing Art
+tab) controls how close a CACHED description must be to reuse its
+answer for free: Exact only reuses identical descriptions;
+Precise/Standard/Loose also reuse region variants ("(USA)" vs
+"(Europe)" — same game, same metadata) and near-identical spellings,
+guarded so numbering must agree (Street Fighter II can never borrow
+Street Fighter III's answer). Always opens on the recommended level,
+never persisted; hack/translation wheels always reuse exactly.
 COST CONTROL — every answer is remembered in data\\enrich_cache.json:
  - identified games are reused FREE forever, across runs AND across
    systems (a Favorites wheel that duplicates other wheels' games
@@ -289,6 +297,14 @@ Three steps, run per checked system in order:
  • Record videos — renders every theme to a 1920x1080 video using the
    suite's recorder (Chrome + ffmpeg; can take a while — the log pane
    streams the recorder's progress live).
+VALIDATOR (user rule — replaces the old Install checkbox): after
+Record finishes, a review window opens with every staged recording
+in a medium box, playable IN PLACE with sound (bundled ffmpeg), each
+with a checkbox (all ticked). "Accept & install selected" replaces
+the theme zips of the TICKED recordings (originals backed up,
+revertible); unticked ones are set aside in ThemeVideos\\rejected_*.
+Closing the window installs NOTHING — recordings stay staged and the
+validator reopens after the next Record run.
 CORRUPTED VIDEOS: the convert step probes every snap; unreadable
 files ("moov atom not found" etc.) are skipped, logged to
 corrupted_videos.log, and at the END of the run a red-text prompt
