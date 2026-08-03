@@ -272,8 +272,47 @@ def _index_games(cfg, system, games):
     return False
 
 
+# cache-reuse fuzziness per UI level (user rule: same selector logic as
+# the Missing Art tab). Exact stays today's behavior; the fuzzy levels
+# let NEAR-IDENTICAL descriptions (region variants: '(USA)' vs
+# '(Europe)') reuse a cached answer for free - guarded so numbering must
+# agree (Street Fighter II can never reuse Street Fighter III's answer).
+_CACHE_CUTOFFS = {"Exact only": None, "Precise": 0.95,
+                  "Standard (recommended)": 0.90, "Loose": 0.85}
+DEFAULT_MATCH_LEVEL = "Standard (recommended)"
+
+
+def _base_key(k):
+    return re.sub(r"\s+", " ", re.sub(r"\([^)]*\)", "", k)).strip()
+
+
+def _fuzzy_cache_hit(cache, keys, stripped, key, cutoff):
+    import difflib
+    from .emumovies import _numbers
+
+    def usable(c):
+        if _numbers(c) != _numbers(key):
+            return None                 # sequels never borrow answers
+        hit = cache.get(c)
+        return hit if (hit and hit.get("year") and hit.get("manufacturer")
+                       and hit.get("genre")) else None
+    # region variants FIRST: '(USA)' vs '(Europe)' is an exact match once
+    # the parenthesized tags are stripped
+    c = stripped.get(_base_key(key))
+    if c:
+        hit = usable(c)
+        if hit:
+            return hit
+    for c in difflib.get_close_matches(key, keys, n=3, cutoff=cutoff):
+        hit = usable(c)
+        if hit:
+            return hit
+    return None
+
+
 def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=None,
-                  web_search=False, retry_failed=False):
+                  web_search=False, retry_failed=False,
+                  match_level=DEFAULT_MATCH_LEVEL):
     """Enrich one system. log: callable(msg). stop_flag: callable() -> bool.
     Returns summary dict."""
     xml_path = hdb.system_xml_path(cfg["hyperspin_root"], system)
@@ -289,7 +328,19 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
     updates = {}
     # ---- cost control: cache + clone dedup (no API call for any of it) --
     cache = _load_cache()
-    cached_hits = skipped_failed = 0
+    cutoff = _CACHE_CUTOFFS.get(match_level,
+                                _CACHE_CUTOFFS[DEFAULT_MATCH_LEVEL])
+    from .artfinder import strict_system
+    if cutoff is not None and strict_system(system):
+        cutoff = None       # hack/translation wheels: exact reuse only
+        log(f"[{system}] hack-style wheel — cache reuse restricted to "
+            f"EXACT descriptions (fuzzy reuse would borrow the base "
+            f"game's metadata)")
+    cache_keys = list(cache.keys()) if cutoff is not None else []
+    stripped = {}
+    for c in cache_keys:
+        stripped.setdefault(_base_key(c), c)
+    cached_hits = fuzzy_hits = skipped_failed = 0
     groups = {}          # cache_key -> [games]  (clones share one answer)
     for g in missing:
         key = _cache_key(g)
@@ -303,12 +354,22 @@ def enrich_system(cfg, system, log, stop_flag, only_fill_empty=True, progress=No
         if hit and hit.get("status") == "failed" and not retry_failed:
             skipped_failed += 1
             continue
+        if not hit and cache_keys:
+            fz = _fuzzy_cache_hit(cache, cache_keys, stripped, key, cutoff)
+            if fz:
+                updates[g.name] = {"year": fz["year"],
+                                   "manufacturer": fz["manufacturer"],
+                                   "genre": fz["genre"]}
+                fuzzy_hits += 1
+                continue
         groups.setdefault(key, []).append(g)
     to_ask = [gs[0] for gs in groups.values()]   # one representative per clone group
     dup_saved = sum(len(gs) - 1 for gs in groups.values())
-    if cached_hits:
-        log(f"[{system}] {cached_hits} game(s) filled FREE from the "
-            f"enrichment cache (previous runs / other systems)")
+    if cached_hits or fuzzy_hits:
+        log(f"[{system}] {cached_hits + fuzzy_hits} game(s) filled FREE "
+            f"from the enrichment cache"
+            + (f" ({fuzzy_hits} via close-description reuse, "
+               f"level: {match_level})" if fuzzy_hits else ""))
     if skipped_failed:
         log(f"[{system}] {skipped_failed} game(s) skipped — previously "
             f"unidentifiable even with web search (tick 'Retry games "

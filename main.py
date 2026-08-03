@@ -869,6 +869,18 @@ class ClinicApp(tk.Tk):
                                     "(they are cached and skipped for free "
                                     "otherwise)"),
                         variable=self.var_retry_failed).pack(anchor="w")
+        rlvl = ttk.Frame(opts); rlvl.pack(anchor="w")
+        ttk.Label(rlvl, text="Cache matching: ", style="Sub.TLabel").pack(side="left")
+        # per run, never persisted (user rule) - always opens on the
+        # recommended level, same selector logic as the Missing Art tab
+        self.var_enrich_match = tk.StringVar(value=enrich.DEFAULT_MATCH_LEVEL)
+        ttk.Combobox(rlvl, textvariable=self.var_enrich_match,
+                     state="readonly", width=24,
+                     values=list(enrich._CACHE_CUTOFFS)).pack(side="left")
+        ttk.Label(rlvl, style="Sub.TLabel",
+                  text=("  — how close a cached description must be to "
+                        "reuse its answer for free (hack/translation "
+                        "wheels always exact)")).pack(side="left")
         rfix = ttk.Frame(opts); rfix.pack(anchor="w")
         self.var_fix_tags = tk.BooleanVar(value=False)
         ttk.Checkbutton(rfix, text="Repair duplicate empty tags only",
@@ -958,6 +970,8 @@ class ClinicApp(tk.Tk):
         fill_empty = self.var_fill_empty.get()   # read on the UI thread
         web_search = self.var_web_search.get()
         retry_failed = self.var_retry_failed.get()
+        match_level = self.var_enrich_match.get()
+        self._log(f"cache matching level: {match_level}")
         self.pb.configure(maximum=total * 100, value=0)
 
         def status(idx, frac, msg):
@@ -981,6 +995,7 @@ class ClinicApp(tk.Tk):
                             only_fill_empty=fill_empty,
                             web_search=web_search,
                             retry_failed=retry_failed,
+                            match_level=match_level,
                             progress=lambda f, m, i=idx: status(i, f, m))
                     except enrich.StopRequested:
                         self._log("— stopped by user —")
@@ -2182,14 +2197,17 @@ class ClinicApp(tk.Tk):
         opts = ttk.Frame(tab)
         opts.pack(fill="x", pady=(6, 2), **pad)
         ttk.Label(opts, text="Steps: ", style="Sub.TLabel").pack(side="left")
+        # install checkbox removed (user rule): after Record, a VALIDATOR
+        # window plays each recording and only accepted ones install
         self.ts_ops = {
             "convert": tk.BooleanVar(value=True),
             "record": tk.BooleanVar(value=False),
-            "install": tk.BooleanVar(value=False),
         }
         ttk.Checkbutton(opts, text="Convert 16:9", variable=self.ts_ops["convert"]).pack(side="left")
         ttk.Checkbutton(opts, text="Record videos", variable=self.ts_ops["record"]).pack(side="left", padx=(6, 0))
-        ttk.Checkbutton(opts, text="Install videos", variable=self.ts_ops["install"]).pack(side="left", padx=(6, 0))
+        ttk.Label(opts, style="Sub.TLabel",
+                  text="  (recordings are validated and installed from a "
+                       "review window after Record)").pack(side="left")
 
         run = ttk.Frame(tab)
         run.pack(fill="x", pady=(6, 2), **pad)
@@ -2236,15 +2254,10 @@ class ClinicApp(tk.Tk):
                 "Themes", "The bundled theme_suite folder is missing next "
                 "to the application - reinstall the release package.")
             return
-        steps = [k for k in ("convert", "record", "install")
+        steps = [k for k in ("convert", "record")
                  if self.ts_ops[k].get()]
         if not steps:
             messagebox.showinfo("Themes", "Pick at least one step.")
-            return
-        if "install" in steps and not messagebox.askyesno(
-                "Themes", "Install replaces theme zips with video-theme "
-                "recordings (originals are backed up and revertible). "
-                "Continue?"):
             return
         self._ts_stop = False
         self.btn_ts_start.configure(state="disabled")
@@ -2253,8 +2266,7 @@ class ClinicApp(tk.Tk):
         n_total = len(selected) * len(steps)
         self.pb_ts.configure(maximum=n_total, value=0)
         runners = {"convert": themesuite.convert_system,
-                   "record": themesuite.record_system,
-                   "install": themesuite.install_system}
+                   "record": themesuite.record_system}
 
         def status(done, msg):
             self.after(0, lambda: (
@@ -2297,6 +2309,26 @@ class ClinicApp(tk.Tk):
                         done += 1
                         status(done, f"{s_name}: {step} done")
                 self._ts_log(f"=== suite finished ({done}/{n_total} steps) ===")
+                # user rule: after Record, the staged recordings go
+                # through a VALIDATOR (play + accept) before installing
+                if "record" in steps and not self._ts_stop:
+                    recs = []
+                    for s_name in selected:
+                        base = themesuite.system_dir(cfg, s_name)
+                        tv = os.path.join(base, "ThemeVideos")
+                        if os.path.isdir(tv):
+                            for f in sorted(os.listdir(tv)):
+                                if f.lower().endswith(".mp4"):
+                                    recs.append({"system": s_name,
+                                                 "game": os.path.splitext(f)[0],
+                                                 "staged": os.path.join(tv, f),
+                                                 "base": base})
+                    if recs:
+                        self.after(0, lambda r=recs, c=cfg:
+                                   self._validate_recordings(r, c))
+                    else:
+                        self._ts_log("no staged recordings found to "
+                                     "validate/install")
                 # user rule: corrupted videos found during the convert
                 # probe are offered for deletion at the END of the run
                 if "convert" in steps:
@@ -2325,6 +2357,130 @@ class ClinicApp(tk.Tk):
                                        self.btn_ts_stop.configure(state="disabled")))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _validate_recordings(self, items, cfg):
+        """Theme-recording validator (user rule): every staged recording
+        playable IN ITS BOX (like the Missing Art review) with a
+        checkbox; Accept installs the ticked ones per system, unticked
+        recordings are set aside. Closing the window installs NOTHING
+        (recordings stay staged for a later Record run)."""
+        from PIL import Image, ImageTk
+        BOXW, BOXH = 300, 200
+        win = tk.Toplevel(self)
+        win.title(f"Validate theme recordings — {len(items)} staged")
+        win.geometry("1040x680")
+        win.transient(self)
+        win._thumbs = []
+        win._player = {"cur": None}
+        ttk.Label(win, text=("Play each recording in its box (with sound) "
+                             "and untick any you don't want. Accept "
+                             "INSTALLS the ticked ones (theme zips are "
+                             "replaced; originals backed up, revertible). "
+                             "Closing installs nothing — recordings stay "
+                             "staged."),
+                  style="Sub.TLabel", wraplength=980,
+                  justify="left").pack(anchor="w", padx=12, pady=(10, 4))
+        wrap = ttk.Frame(win); wrap.pack(fill="both", expand=True, padx=12)
+        canvas = tk.Canvas(wrap, highlightthickness=1,
+                           highlightbackground="#dddddd", bg=BG)
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>", lambda e: canvas.configure(
+            scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        ff = artfinder._ffmpeg()
+        COLS = 3
+        for i, it in enumerate(items):
+            it["_var"] = tk.BooleanVar(value=True)
+            c = ttk.Frame(inner, borderwidth=1, relief="solid")
+            c.grid(row=i // COLS, column=i % COLS, padx=6, pady=6,
+                   sticky="n")
+            ph0 = ImageTk.PhotoImage(Image.new("RGB", (BOXW, BOXH),
+                                               (16, 16, 16)))
+            win._thumbs.append(ph0)
+            box = tk.Label(c, image=ph0, bg="black")
+            box.pack()
+            ttk.Checkbutton(c, variable=it["_var"],
+                            text=f"{it['system']} — {it['game']}"[:44]
+                            ).pack(anchor="w", padx=4)
+            btn = ttk.Button(c, text="▶ Play")
+            btn.pack(anchor="w", padx=4, pady=(0, 4))
+            player = _SnapPlayer(self, win, box, btn, it["staged"], ff,
+                                 (BOXW, BOXH))
+            btn.configure(command=player.toggle)
+
+        bar = ttk.Frame(win); bar.pack(fill="x", padx=12, pady=8)
+        ttk.Button(bar, text="All", width=5, command=lambda: [
+            it["_var"].set(True) for it in items]).pack(side="left")
+        ttk.Button(bar, text="None", width=6, command=lambda: [
+            it["_var"].set(False) for it in items]).pack(side="left", padx=(4, 0))
+        ttk.Label(bar, text=f"{len(items)} recording(s) staged",
+                  style="Sub.TLabel").pack(side="left", padx=12)
+
+        def close_only():
+            if win._player["cur"]:
+                win._player["cur"].stop()
+            win.destroy()
+            self._ts_log("validator closed — nothing installed, "
+                         "recordings remain staged in ThemeVideos")
+
+        def accept():
+            keep = [it for it in items if it["_var"].get()]
+            drop = [it for it in items if not it["_var"].get()]
+            if not keep:
+                close_only()
+                return
+            if win._player["cur"]:
+                win._player["cur"].stop()
+            win.destroy()
+
+            def work():
+                import time as _t
+                stamp = _t.strftime("%Y%m%d-%H%M%S")
+                systems = []
+                for it in drop:
+                    rej = os.path.join(os.path.dirname(it["staged"]),
+                                       f"rejected_{stamp}")
+                    try:
+                        os.makedirs(rej, exist_ok=True)
+                        os.replace(it["staged"], os.path.join(
+                            rej, os.path.basename(it["staged"])))
+                        self._ts_log(f"  - {it['system']}: {it['game']} "
+                                     f"rejected (moved to ThemeVideos\\"
+                                     f"rejected_{stamp})")
+                    except OSError as e:
+                        self._ts_log(f"  ! could not set aside "
+                                     f"{it['game']}: {e}")
+                for it in keep:
+                    if it["system"] not in systems:
+                        systems.append(it["system"])
+                ok = 0
+                for s_name in systems:
+                    try:
+                        if themesuite.install_system(
+                                cfg, s_name, self._ts_log,
+                                lambda: False):
+                            ok += 1
+                    except Exception as e:
+                        self._ts_log(f"[{s_name}] install ERROR: {e}")
+                self._ts_log(f"=== validator done: {len(keep)} "
+                             f"recording(s) accepted, {len(drop)} "
+                             f"rejected, {ok}/{len(systems)} system(s) "
+                             f"installed ===")
+                self.after(0, lambda: messagebox.showinfo(
+                    "Themes", f"{len(keep)} recording(s) installed across "
+                    f"{ok} system(s)"
+                    + (f"; {len(drop)} rejected (set aside)."
+                       if drop else ".")))
+            threading.Thread(target=work, daemon=True).start()
+
+        ttk.Button(bar, text="✔ Accept & install selected",
+                   command=accept).pack(side="right")
+        win.protocol("WM_DELETE_WINDOW", close_only)
 
     def _offer_delete_corrupted(self, bad):
         """End-of-run prompt (user rule): the convert probe found
