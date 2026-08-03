@@ -297,6 +297,13 @@ Three steps, run per checked system in order:
  • Record videos — renders every theme to a 1920x1080 video using the
    suite's recorder (Chrome + ffmpeg; can take a while — the log pane
    streams the recorder's progress live).
+TEST FLASH THEMES (Ruffle): themes whose art is ALL Flash (.swf, no
+png/jpg) are left untouched by the converter, so the only way to
+verify them is to RENDER them — which runs the suite's bundled Ruffle
+Flash emulator. Tick "Test Flash themes (Ruffle)" and those themes
+are test-rendered (only they are re-rendered, everything else is left
+alone) and appear in the validator tagged [FLASH/Ruffle], where they
+can be played and accepted or rejected like any other recording.
 VALIDATOR (user rule — replaces the old Install checkbox): after
 Record finishes, a review window opens with every staged recording
 in a medium box, playable IN PLACE with sound (bundled ffmpeg), each
