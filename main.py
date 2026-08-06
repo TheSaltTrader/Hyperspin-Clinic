@@ -38,6 +38,45 @@ def _snap_poster(ff, path, size=(300, 200)):
         return None
 
 
+# ---- poster frames are rendered by a SMALL pool, never one thread per
+# video: a 567-video review otherwise spawned 567 ffmpeg processes and
+# the review window never finished laying out ----------------------
+_POSTER_Q = queue.Queue()
+_POSTER_POOL = []
+
+
+def _poster_worker():
+    while True:
+        job = _POSTER_Q.get()
+        try:
+            if job is not None:
+                job()
+        except Exception:
+            pass
+        finally:
+            _POSTER_Q.task_done()
+
+
+def _queue_poster(job, workers=2):
+    if not _POSTER_POOL:
+        for _ in range(workers):
+            t = threading.Thread(target=_poster_worker, daemon=True)
+            t.start()
+            _POSTER_POOL.append(t)
+    _POSTER_Q.put(job)
+
+
+def _drain_posters():
+    """Forget queued poster work - used when a review window closes so
+    the pool is not still decoding frames for a window that is gone."""
+    try:
+        while True:
+            _POSTER_Q.get_nowait()
+            _POSTER_Q.task_done()
+    except queue.Empty:
+        pass
+
+
 class _SnapPlayer:
     """Plays a staged snap INSIDE its review box (user rule): frames are
     decoded by the bundled ffmpeg — so every codec ffmpeg knows plays —
@@ -51,7 +90,11 @@ class _SnapPlayer:
         self.proc = None
         self.playing = False
         self.poster = None
-        threading.Thread(target=self._load_poster, daemon=True).start()
+        # a review with 500+ videos used to start 500+ threads, each
+        # launching its own ffmpeg: the machine thrashed and the window
+        # never finished drawing (user report: cards cut off at the
+        # bottom). Poster frames now go through a SMALL shared pool.
+        _queue_poster(self._load_poster)
 
     def _alive(self):
         try:
@@ -72,6 +115,12 @@ class _SnapPlayer:
             self.win._thumbs.append(self.poster)
             if not self.playing:
                 self.box.configure(image=self.poster)
+            # the cards change height as posters arrive; without this the
+            # scrollable area keeps its old size and the bottom rows can
+            # never be reached (user report: list cut off)
+            refresh = getattr(self.win, "_refresh_scroll", None)
+            if refresh:
+                self.win.after_idle(refresh)
         self.app.after(0, put)
 
     def toggle(self):
@@ -1508,6 +1557,14 @@ class ClinicApp(tk.Tk):
         inner = ttk.Frame(canvas)
         inner.bind("<Configure>", lambda e: canvas.configure(
             scrollregion=canvas.bbox("all")))
+        win._refresh_scroll = lambda: canvas.configure(
+            scrollregion=canvas.bbox("all"))
+        canvas.bind("<MouseWheel>",
+                    lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1,
+                                                  "units"))
+        inner.bind("<MouseWheel>",
+                   lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1,
+                                                 "units"))
         canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=sb.set)
         canvas.pack(side="left", fill="both", expand=True)
@@ -1609,11 +1666,31 @@ class ClinicApp(tk.Tk):
                            if rejected else "."))))
             threading.Thread(target=work, daemon=True).start()
 
+        def cancel_all():
+            """Closing the window is a REFUSAL of everything found (user
+            rule): nothing is installed and the staged files go."""
+            if win._player["cur"]:
+                win._player["cur"].stop()
+            _drain_posters()
+            for it in items:
+                it["accepted"] = False
+                it.pop("_var", None)
+            win.destroy()
+            self._art_log("review cancelled — nothing was installed; all "
+                          "%d found item(s) were discarded" % len(items))
+
+            def work():
+                ok, rejected = artfinder.finalize_review(
+                    dict(self.cfg), items, self._art_log)
+                self.after(0, lambda: self.lbl_art_status.configure(
+                    text="cancelled — %d item(s) discarded" % rejected))
+            threading.Thread(target=work, daemon=True).start()
+
+        ttk.Button(bar, text="✕ Cancel (install nothing)",
+                   command=cancel_all).pack(side="right", padx=(0, 8))
         ttk.Button(bar, text="✔ Accept & install selected",
                    command=accept).pack(side="right")
-        # closing the window = accept the current selection (all ticked
-        # by default, matching the pre-review behavior)
-        win.protocol("WM_DELETE_WINDOW", accept)
+        win.protocol("WM_DELETE_WINDOW", cancel_all)
 
     # ---------- Rename tab ----------
     def _build_rename(self, tab):
@@ -2415,6 +2492,14 @@ class ClinicApp(tk.Tk):
         inner = ttk.Frame(canvas)
         inner.bind("<Configure>", lambda e: canvas.configure(
             scrollregion=canvas.bbox("all")))
+        win._refresh_scroll = lambda: canvas.configure(
+            scrollregion=canvas.bbox("all"))
+        canvas.bind("<MouseWheel>",
+                    lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1,
+                                                  "units"))
+        inner.bind("<MouseWheel>",
+                   lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1,
+                                                 "units"))
         canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=sb.set)
         canvas.pack(side="left", fill="both", expand=True)
